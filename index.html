@@ -715,27 +715,36 @@ async function pullFromDrive() {
                 return;
               }
 
-              // Download each file
+              // Load clips as metadata only (no full download)
+              // Videos stream on-demand when added to timeline
+              const accessToken = tokenResponse.access_token;
               let loaded = 0;
               for (const file of allFiles) {
-                try {
-                  loaded++;
-                  btn.textContent = `⏳ Loading ${loaded}/${allFiles.length}: ${file.name}`;
-                  const fileResponse = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`,
-                    { headers: { Authorization: `Bearer ${tokenResponse.access_token}` } }
-                  );
-                  if (!fileResponse.ok) {
-                    console.warn(`Skipping ${file.name}: HTTP ${fileResponse.status}`);
-                    continue;
-                  }
-                  const blob = await fileResponse.blob();
-                  const url = URL.createObjectURL(blob);
-                  await loadClipFromUrl(url, file.name);
-                } catch (dlErr) {
-                  console.warn(`Failed to download ${file.name}:`, dlErr);
-                }
+                loaded++;
+                btn.textContent = `⏳ Indexing ${loaded}/${allFiles.length}: ${file.name}`;
+                const streamUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`;
+                const sizeMB = file.size ? (parseInt(file.size) / (1024*1024)).toFixed(1) : '?';
+                const clip = {
+                  id: 'c-'+Date.now()+'-'+Math.random().toString(36).substr(2,4),
+                  name: file.name,
+                  driveId: file.id,
+                  streamUrl: streamUrl,
+                  accessToken: accessToken,
+                  thumbnail: file.thumbnailLink || null,
+                  size: file.size,
+                  sizeMB: sizeMB,
+                  mimeType: file.mimeType,
+                  createdTime: file.createdTime,
+                  duration: 0,
+                  tags: [],
+                  aiAnalysis: null,
+                  loaded: false
+                };
+                clip.tags = guessTagsFromName(file.name);
+                clips.push(clip);
               }
+              renderClips();
+              updateStats();
 
               resolve();
             }
@@ -758,6 +767,42 @@ async function pullFromDrive() {
   btn.textContent = `✓ ${clips.length} clips loaded from Drive`;
   btn.disabled = false;
   setTimeout(() => { btn.textContent = '📁 Pull from Google Drive'; }, 3000);
+}
+
+async function preloadClip(clipId) {
+  const clip = clips.find(c => c.id === clipId);
+  if (!clip || clip.loaded || clip.url) return; // already loaded
+  if (!clip.streamUrl || !clip.accessToken) return; // not a Drive clip
+
+  // Show loading state
+  const card = document.getElementById(clipId);
+  if (card) card.style.opacity = '0.5';
+
+  try {
+    const resp = await fetch(clip.streamUrl, {
+      headers: { Authorization: `Bearer ${clip.accessToken}` }
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    clip.url = URL.createObjectURL(blob);
+    clip.loaded = true;
+
+    // Get duration from video metadata
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.src = clip.url;
+    await new Promise(r => { v.onloadedmetadata = r; v.onerror = r; });
+    if (v.duration && isFinite(v.duration)) clip.duration = v.duration;
+
+    // Run AI analysis if enabled
+    if (CONFIG.ai.enabled && !clip.aiAnalysis) analyzeClipAI(clip);
+
+    renderClips();
+    updateStats();
+  } catch (e) {
+    console.warn(`Failed to load ${clip.name}:`, e);
+    if (card) card.style.opacity = '1';
+  }
 }
 
 function loadClipFromUrl(url, name) {
@@ -1088,11 +1133,17 @@ function renderClips() {
   g.innerHTML = clips.map(cl => {
     const mainTag = cl.tags[0] || 'Unclassified';
     const ai = cl.aiAnalysis;
-    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}">
-      <video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video>
-      <span class="c-dur">${fmtT(cl.duration)}</span>
+    const hasVideo = cl.url || cl.loaded;
+    const thumbSrc = cl.thumbnail ? cl.thumbnail.replace('=s220','=s160') : '';
+    const videoEl = hasVideo
+      ? `<video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video>`
+      : (thumbSrc ? `<img src="${thumbSrc}" style="width:100%;height:80px;object-fit:cover;border-radius:4px;" referrerpolicy="no-referrer">` : `<div style="width:100%;height:80px;background:var(--surface);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:20px;">🎬</div>`);
+    const durLabel = cl.duration > 0 ? fmtT(cl.duration) : (cl.sizeMB ? cl.sizeMB+'MB' : '');
+    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}" onclick="preloadClip('${cl.id}')">
+      ${videoEl}
+      <span class="c-dur">${durLabel}</span>
       <span class="c-tag" style="background:${PC[mainTag]||'#888'}">${mainTag}</span>
-      <button class="c-rm" onclick="rmClip('${cl.id}')">✕</button>
+      <button class="c-rm" onclick="event.stopPropagation();rmClip('${cl.id}')">✕</button>
       ${ai ? `<div class="c-ai"><div class="c-ai-tags">${(ai.tags||[]).slice(0,3).map(t=>`<span class="c-ai-tag">${t}</span>`).join('')}${ai.viral_potential?`<span class="c-ai-tag" style="background:${ai.viral_potential==='high'?'rgba(39,174,96,.4)':'rgba(255,255,255,.1)'}">${ai.viral_potential} viral</span>`:''}</div></div>` : ''}
       <div class="c-name">${cl.name}</div>
     </div>`;
