@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Superior Plumbing — Video Production Studio</title>
+<script src="https://apis.google.com/js/api.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root {
+    --navy: #1B3A5C; --blue: #2E75B6; --light-blue: #D5E8F0; --green: #27AE60;
+    --orange: #E67E22; --purple: #8E44AD; --yellow: #F1C40F; --red: #E74C3C;
+    --bg: #0f1923; --card: #162230; --card2: #1a2940; --surface: #1e3348;
+    --text: #e8ecf1; --muted: #7a8ea0; --border: #243447; --glow: rgba(46,117,182,0.15);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+
+  /* ── SETUP WIZARD ── */
+  .wizard-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+  .wizard-overlay.hidden { display: none; }
+  .wizard { max-width: 640px; width: 95%; }
+  .wizard-logo { text-align: center; margin-bottom: 32px; }
+  .wizard-logo h1 { font-size: 28px; color: white; margin-bottom: 4px; }
+  .wizard-logo h1 span { color: var(--blue); }
+  .wizard-logo p { color: var(--muted); font-size: 14px; }
+  .wizard-step { display: none; }
+  .wizard-step.active { display: block; }
+  .wiz-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 16px; }
+  .wiz-card h2 { font-size: 18px; margin-bottom: 6px; }
+  .wiz-card h2 .step-num { color: var(--blue); }
+  .wiz-card p { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+  .wiz-input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: white; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; font-family: inherit; }
+  .wiz-input:focus { outline: none; border-color: var(--blue); }
+  .wiz-input::placeholder { color: var(--muted); }
+  .wiz-btn { background: var(--blue); color: white; border: none; padding: 10px 24px; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+  .wiz-btn:hover { background: #3a8fd4; }
+  .wiz-btn.secondary { background: var(--surface); }
+  .wiz-btn.secondary:hover { background: var(--card2); }
+  .wiz-btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .wiz-check { display: flex; align-items: flex-start; gap: 10px; padding: 12px; background: var(--bg); border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 1px solid var(--border); transition: all 0.2s; }
+  .wiz-check:hover { border-color: var(--blue); }
+  .wiz-check.selected { border-color: var(--blue); background: var(--glow); }
+  .wiz-check-dot { width: 20px; height: 20px; border: 2px solid var(--border); border-radius: 50%; flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; }
+  .wiz-check.selected .wiz-check-dot { border-color: var(--blue); background: var(--blue); }
+  .wiz-check.selected .wiz-check-dot::after { content: '✓'; color: white; font-size: 11px; }
+  .wiz-check-info h4 { font-size: 13px; margin-bottom: 2px; }
+  .wiz-check-info p { font-size: 11px; color: var(--muted); margin: 0; }
+  .wiz-status { padding: 10px 14px; border-radius: 6px; font-size: 12px; margin-top: 10px; }
+  .wiz-status.success { background: rgba(39,174,96,0.15); color: var(--green); border: 1px solid rgba(39,174,96,0.3); }
+  .wiz-status.error { background: rgba(231,76,60,0.15); color: var(--red); border: 1px solid rgba(231,76,60,0.3); }
+  .wiz-status.info { background: rgba(46,117,182,0.15); color: var(--blue); border: 1px solid rgba(46,117,182,0.3); }
+  .wiz-code { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-family: 'SF Mono', 'Consolas', monospace; font-size: 11px; color: var(--muted); margin: 10px 0; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .wiz-expand { cursor: pointer; color: var(--blue); font-size: 12px; margin-top: 6px; }
+
+  /* ── HEADER ── */
+  .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 16px; color: white; font-weight: 600; }
+  .header h1 span { color: var(--blue); font-weight: 400; }
+  .header-right { display: flex; align-items: center; gap: 20px; }
+  .stat-group { display: flex; gap: 16px; }
+  .stat { text-align: center; }
+  .stat-n { font-size: 20px; font-weight: 700; color: var(--blue); line-height: 1; }
+  .stat-l { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .conn-badge { font-size: 11px; padding: 4px 10px; border-radius: 12px; }
+  .conn-badge.on { background: rgba(39,174,96,0.15); color: var(--green); border: 1px solid rgba(39,174,96,0.3); }
+  .conn-badge.off { background: rgba(136,136,136,0.15); color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── LAYOUT ── */
+  .app { display: flex; height: calc(100vh - 52px); }
+  .app.hidden { display: none; }
+  .sidebar { width: 300px; background: var(--card); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── SIDEBAR ── */
+  .sb-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .sb-section h3 { font-size: 10px; text-transform: uppercase; color: var(--muted); letter-spacing: 1px; margin-bottom: 10px; }
+  .tmpl-card { background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; transition: all 0.15s; }
+  .tmpl-card:hover { border-color: var(--blue); }
+  .tmpl-card.active { border-color: var(--blue); background: var(--glow); box-shadow: 0 0 20px var(--glow); }
+  .tmpl-name { font-weight: 600; font-size: 13px; }
+  .tmpl-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .tmpl-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600; color: white; }
+  .clip-lib { flex: 1; overflow-y: auto; padding: 14px 16px; }
+
+  /* Upload */
+  .upload-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 10px; }
+  .upload-zone:hover, .upload-zone.over { border-color: var(--blue); background: var(--glow); }
+  .upload-icon { font-size: 28px; margin-bottom: 6px; }
+  .upload-text { font-size: 11px; color: var(--muted); }
+  .drive-btn { width: 100%; background: var(--surface); border: 1px solid var(--border); color: white; padding: 8px; border-radius: 6px; font-size: 12px; cursor: pointer; margin-bottom: 10px; transition: all 0.2s; }
+  .drive-btn:hover { border-color: var(--blue); background: var(--glow); }
+  .drive-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Clip grid */
+  .clip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .clip-card { position: relative; background: var(--bg); border-radius: 6px; overflow: hidden; cursor: grab; border: 1.5px solid transparent; transition: all 0.15s; }
+  .clip-card:hover { border-color: var(--blue); }
+  .clip-card video { width: 100%; height: 70px; object-fit: cover; display: block; }
+  .clip-card .c-dur { position: absolute; top: 3px; right: 3px; background: rgba(0,0,0,.75); color: white; font-size: 9px; padding: 1px 4px; border-radius: 3px; }
+  .clip-card .c-tag { position: absolute; top: 3px; left: 3px; padding: 1px 5px; border-radius: 3px; font-size: 8px; font-weight: 700; color: white; }
+  .clip-card .c-name { padding: 3px 5px; font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .clip-card .c-rm { position: absolute; top: 3px; right: 3px; background: rgba(231,76,60,.85); color: white; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; display: none; }
+  .clip-card:hover .c-rm { display: block; }
+  .clip-card:hover .c-dur { display: none; }
+  .clip-card .c-ai { position: absolute; bottom: 18px; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,.85)); padding: 14px 5px 3px; }
+  .clip-card .c-ai-tags { display: flex; flex-wrap: wrap; gap: 2px; }
+  .clip-card .c-ai-tag { font-size: 7px; padding: 0 3px; border-radius: 2px; background: rgba(255,255,255,.15); color: white; }
+
+  /* ── AI PANEL ── */
+  .ai-summary { background: linear-gradient(135deg, rgba(46,117,182,0.08), rgba(142,68,173,0.08)); border: 1px solid rgba(46,117,182,0.2); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .ai-summary h4 { font-size: 11px; color: var(--blue); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+  .ai-pill { display: inline-block; padding: 2px 7px; border-radius: 8px; font-size: 9px; font-weight: 600; margin: 1px 2px; }
+  .ai-bar { height: 4px; border-radius: 2px; margin-top: 4px; }
+  .ai-suggestion { font-size: 10px; color: var(--muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .ai-suggestion strong { color: var(--text); }
+
+  /* ── MAIN TABS ── */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--card); }
+  .tab { padding: 10px 18px; font-size: 12px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab:hover { color: white; }
+  .tab.active { color: white; border-bottom-color: var(--blue); }
+
+  /* ── EDITOR ── */
+  .editor { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; background: #0a1118; position: relative; overflow: hidden; }
+  .phone { width: 240px; height: 426px; background: #000; border-radius: 20px; border: 2.5px solid #2a2a2a; overflow: hidden; position: relative; flex-shrink: 0; }
+  .phone video { width: 100%; height: 100%; object-fit: cover; }
+  .phone .empty { color: var(--muted); font-size: 12px; text-align: center; padding: 20px; position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .phone .empty .e-icon { font-size: 36px; margin-bottom: 10px; }
+  .phone .ovr { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
+  .ovr-hook { background: rgba(0,0,0,.65); color: white; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 5px; text-align: center; backdrop-filter: blur(4px); }
+  .ovr-cta { background: var(--blue); color: white; font-size: 10px; font-weight: 600; padding: 6px 10px; border-radius: 5px; text-align: center; }
+  .ovr-wm { position: absolute; bottom: 32px; right: 10px; color: rgba(255,255,255,.4); font-size: 7px; font-weight: 700; letter-spacing: 0.5px; }
+  .controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
+  .ctrl-btn { background: var(--card); border: 1px solid var(--border); color: white; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+  .ctrl-btn:hover { background: var(--blue); border-color: var(--blue); }
+  .ctrl-btn.primary { background: var(--blue); border-color: var(--blue); }
+  .ctrl-time { font-size: 11px; color: var(--muted); }
+
+  /* Text panel */
+  .txt-panel { position: absolute; top: 20px; right: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; width: 240px; }
+  .txt-panel h4 { font-size: 10px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.5px; }
+  .txt-grp { margin-bottom: 10px; }
+  .txt-grp label { font-size: 10px; color: var(--muted); display: block; margin-bottom: 3px; }
+  .txt-grp input, .txt-grp select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: white; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-family: inherit; }
+  .txt-grp input:focus, .txt-grp select:focus { outline: none; border-color: var(--blue); }
+
+  /* AI Recommendation panel */
+  .ai-rec { position: absolute; top: 20px; left: 20px; background: var(--card); border: 1px solid rgba(46,117,182,0.3); border-radius: 8px; padding: 14px; width: 220px; }
+  .ai-rec h4 { font-size: 10px; text-transform: uppercase; color: var(--blue); margin-bottom: 8px; letter-spacing: 0.5px; display: flex; align-items: center; gap: 4px; }
+  .ai-rec .rec-item { font-size: 11px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .ai-rec .rec-item:last-child { border: none; }
+  .ai-rec .rec-label { color: var(--muted); font-size: 9px; text-transform: uppercase; }
+  .ai-rec .rec-val { font-weight: 600; margin-top: 2px; }
+  .ai-rec .rec-action { background: var(--blue); color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 10px; cursor: pointer; width: 100%; margin-top: 8px; font-weight: 600; }
+
+  /* ── TIMELINE ── */
+  .timeline { background: var(--card); border-top: 1px solid var(--border); padding: 14px 20px; }
+  .tl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .tl-header h3 { font-size: 13px; }
+  .tl-header-btns { display: flex; gap: 6px; }
+  .tl-header-btns button { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 4px 12px; border-radius: 4px; font-size: 10px; cursor: pointer; }
+  .tl-header-btns button:hover { border-color: var(--blue); }
+  .tl-header-btns button.save { background: var(--green); border-color: var(--green); color: white; }
+  .tl-tracks { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; }
+  .tl-seg { flex-shrink: 0; background: var(--bg); border: 1.5px solid var(--border); border-radius: 6px; padding: 10px; min-width: 170px; max-width: 220px; transition: all 0.15s; }
+  .tl-seg.over { border-color: var(--green); background: rgba(39,174,96,0.08); }
+  .tl-seg-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .tl-seg-name { font-weight: 600; font-size: 11px; }
+  .tl-seg-dur { font-size: 10px; color: var(--muted); }
+  .tl-drop { border: 1.5px dashed var(--border); border-radius: 5px; padding: 12px 8px; text-align: center; font-size: 10px; color: var(--muted); min-height: 50px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .tl-drop.filled { border-style: solid; border-color: var(--blue); background: rgba(46,117,182,0.06); padding: 6px; }
+  .tl-clip-in { display: flex; align-items: center; gap: 6px; width: 100%; }
+  .tl-clip-in video { width: 50px; height: 34px; object-fit: cover; border-radius: 3px; }
+  .tl-clip-meta { flex: 1; min-width: 0; }
+  .tl-clip-name { font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl-clip-trim { font-size: 9px; color: var(--muted); }
+  .tl-clip-rm { background: none; border: none; color: var(--red); cursor: pointer; font-size: 12px; padding: 2px; }
+  .tl-trim { margin-top: 6px; }
+  .tl-trim-row { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+  .tl-trim-row label { font-size: 9px; color: var(--muted); width: 20px; }
+  .tl-trim-row input[type=range] { flex: 1; height: 3px; accent-color: var(--blue); }
+  .tl-trim-row .tv { font-size: 9px; color: var(--blue); width: 28px; text-align: right; }
+  .tl-empty { color: var(--muted); font-size: 12px; padding: 16px; }
+
+  /* ── QUEUE TAB ── */
+  .queue { flex: 1; overflow-y: auto; padding: 20px; }
+  .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .q-legend { font-size: 10px; color: var(--muted); display: flex; gap: 12px; }
+  .q-legend span::before { content: '●'; margin-right: 3px; }
+  .q-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px; cursor: pointer; transition: all 0.15s; }
+  .q-item:hover { border-color: var(--blue); }
+  .q-num { width: 26px; height: 26px; background: var(--surface); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .q-info { flex: 1; min-width: 0; }
+  .q-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q-sub { font-size: 10px; color: var(--muted); }
+  .q-badge { padding: 2px 8px; border-radius: 8px; font-size: 9px; font-weight: 600; white-space: nowrap; }
+  .q-badge.ready { background: rgba(39,174,96,0.15); color: var(--green); }
+  .q-badge.partial { background: rgba(230,126,34,0.15); color: var(--orange); }
+  .q-badge.empty { background: rgba(136,136,136,0.1); color: var(--muted); }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════ -->
+<!-- SETUP WIZARD -->
+<!-- ═══════════════════════════════════ -->
+<div class="wizard-overlay" id="wizard">
+<div class="wizard">
+  <div class="wizard-logo">
+    <h1>Superior Plumbing <span>Video Studio</span></h1>
+    <p>Let's connect your tools and get you producing videos</p>
+  </div>
+
+  <!-- Step 1: Welcome -->
+  <div class="wizard-step active" id="wiz-1">
+    <div class="wiz-card">
+      <h2><span class="step-num">Step 1 of 3</span> — How It Works</h2>
+      <p>This studio takes your team's raw footage and turns it into 30 finished marketing videos every month using AI-powered templates.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
+        <div style="background:var(--bg);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:24px;margin-bottom:4px;">📱</div>
+          <div style="font-size:11px;font-weight:600;">Team Films</div>
+          <div style="font-size:10px;color:var(--muted);">Raw clips uploaded to Google Drive</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:24px;margin-bottom:4px;">🤖</div>
+          <div style="font-size:11px;font-weight:600;">AI Analyzes</div>
+          <div style="font-size:10px;color:var(--muted);">Transcribes, tags, and classifies each clip</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:24px;margin-bottom:4px;">🎬</div>
+          <div style="font-size:11px;font-weight:600;">Templates Cut</div>
+          <div style="font-size:10px;color:var(--muted);">5 proven formats auto-assemble your videos</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:24px;margin-bottom:4px;">📤</div>
+          <div style="font-size:11px;font-weight:600;">Export & Post</div>
+          <div style="font-size:10px;color:var(--muted);">Ready for TikTok, IG, FB, YouTube</div>
+        </div>
+      </div>
+      <div class="wiz-btn-row">
+        <button class="wiz-btn" onclick="wizNext(2)">Get Started →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Google Drive -->
+  <div class="wizard-step" id="wiz-2">
+    <div class="wiz-card">
+      <h2><span class="step-num">Step 2 of 3</span> — Connect Google Drive</h2>
+      <p>Connect your shared Google Drive folder so the studio can pull raw footage automatically. You'll need a Google Cloud API key and OAuth Client ID.</p>
+
+      <div class="txt-grp">
+        <label>Google API Key</label>
+        <input class="wiz-input" type="text" id="gapi-key" placeholder="AIzaSy..." style="margin-bottom:6px">
+      </div>
+      <div class="txt-grp">
+        <label>Google OAuth Client ID</label>
+        <input class="wiz-input" type="text" id="gclient-id" placeholder="123456789.apps.googleusercontent.com">
+      </div>
+      <div class="txt-grp">
+        <label>Shared Drive Folder ID (from the URL)</label>
+        <input class="wiz-input" type="text" id="gdrive-folder" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+      </div>
+
+      <details style="margin-top:8px;">
+        <summary style="color:var(--blue);font-size:12px;cursor:pointer;">How to get these credentials (takes ~5 min)</summary>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6;">
+          <strong>1.</strong> Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--blue);">console.cloud.google.com</a><br>
+          <strong>2.</strong> Create a new project (e.g., "Superior Video Studio")<br>
+          <strong>3.</strong> Enable the <strong>Google Drive API</strong> and <strong>Google Picker API</strong><br>
+          <strong>4.</strong> Go to Credentials → Create OAuth Client ID (Web application type)<br>
+          <strong>5.</strong> Add your domain to Authorized JavaScript Origins<br>
+          <strong>6.</strong> Copy the Client ID and API Key here<br>
+          <strong>7.</strong> For Folder ID: open the shared folder in Drive and copy the ID from the URL
+        </div>
+      </details>
+
+      <div id="drive-status"></div>
+      <div class="wiz-btn-row">
+        <button class="wiz-btn secondary" onclick="wizNext(3)">Skip for Now</button>
+        <button class="wiz-btn" onclick="testDriveConnection()">Connect & Test →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: AI Config -->
+  <div class="wizard-step" id="wiz-3">
+    <div class="wiz-card">
+      <h2><span class="step-num">Step 3 of 3</span> — AI Engine Setup</h2>
+      <p>Choose your AI engine for analyzing footage. The AI will transcribe audio, identify content type, detect key moments, and recommend which template to use.</p>
+
+      <div class="txt-grp">
+        <label>AI Provider</label>
+        <select class="wiz-input" id="ai-provider" onchange="updateAIFields()">
+          <option value="openai">OpenAI (GPT-4o — recommended for video)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="gemini">Google Gemini (native video understanding)</option>
+          <option value="none">No AI — I'll tag clips manually</option>
+        </select>
+      </div>
+      <div class="txt-grp" id="ai-key-group">
+        <label>API Key</label>
+        <input class="wiz-input" type="password" id="ai-key" placeholder="sk-...">
+      </div>
+
+      <div style="background:var(--bg);border-radius:8px;padding:12px;margin:12px 0;">
+        <div style="font-size:11px;font-weight:600;margin-bottom:6px;">What the AI analyzes in each clip:</div>
+        <div style="font-size:10px;color:var(--muted);line-height:1.6;">
+          🎙️ <strong>Audio Transcription</strong> — what's being said (for captions + hook detection)<br>
+          📊 <strong>Content Classification</strong> — which pillar it fits (Day in Life, Tips, B&A, etc.)<br>
+          ⚡ <strong>Key Moment Detection</strong> — the most engaging 3-5 seconds for the hook<br>
+          😱 <strong>Reaction & Emotion</strong> — finds gross reveals, satisfying moments, funny reactions<br>
+          🎯 <strong>Template Matching</strong> — recommends which template + segment to use<br>
+          ✂️ <strong>Smart Trim Points</strong> — suggests optimal in/out points per segment
+        </div>
+      </div>
+
+      <div id="ai-status"></div>
+      <div class="wiz-btn-row">
+        <button class="wiz-btn secondary" onclick="wizNext(3, true)">Skip — Use Manual Mode</button>
+        <button class="wiz-btn" onclick="saveAIConfig()">Save & Launch Studio →</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════ -->
+<!-- MAIN APP -->
+<!-- ═══════════════════════════════════ -->
+<div class="header" id="app-header" style="display:none">
+  <h1>Superior Plumbing <span>Video Studio</span></h1>
+  <div class="header-right">
+    <div class="stat-group">
+      <div class="stat"><div class="stat-n" id="s-clips">0</div><div class="stat-l">Clips</div></div>
+      <div class="stat"><div class="stat-n" id="s-ready">0</div><div class="stat-l">Ready</div></div>
+      <div class="stat"><div class="stat-n" id="s-left">30</div><div class="stat-l">Left</div></div>
+    </div>
+    <span class="conn-badge off" id="drive-badge">● Drive: Not Connected</span>
+    <span class="conn-badge off" id="ai-badge">● AI: Off</span>
+    <button class="ctrl-btn" onclick="showWizard()" style="font-size:10px;">⚙ Setup</button>
+  </div>
+</div>
+
+<div class="app hidden" id="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sb-section">
+      <h3>Templates</h3>
+      <div id="tmpl-list"></div>
+    </div>
+    <div class="clip-lib">
+      <h3>Raw Footage</h3>
+      <button class="drive-btn" id="drive-pull-btn" onclick="pullFromDrive()" disabled>
+        📁 Pull from Google Drive
+      </button>
+      <div class="upload-zone" id="uzone">
+        <div class="upload-icon">🎬</div>
+        <div class="upload-text">Drag & drop clips or click to browse</div>
+        <input type="file" id="finput" multiple accept="video/*" style="display:none">
+      </div>
+      <div id="ai-sum"></div>
+      <div class="clip-grid" id="cgrid"></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="tabs">
+      <div class="tab active" data-t="editor" onclick="setTab('editor')">✂️ Editor</div>
+      <div class="tab" data-t="queue" onclick="setTab('queue')">📋 Queue (30 Videos)</div>
+    </div>
+
+    <!-- Editor -->
+    <div class="editor" id="tab-editor">
+      <div class="phone" id="phone">
+        <div class="empty" id="phone-empty">
+          <div class="e-icon">📱</div>
+          Pick a template →<br>Drag clips to timeline ↓<br>Preview here
+        </div>
+        <video id="pvid" style="display:none" muted></video>
+        <div class="ovr" id="ovr" style="display:none">
+          <div class="ovr-hook" id="o-hook">Hook text</div>
+          <div>
+            <div class="ovr-wm">SUPERIOR PLUMBING</div>
+            <div class="ovr-cta" id="o-cta">📞 Call Superior Plumbing</div>
+          </div>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="ctrl-btn primary" onclick="playPreview()" id="play-btn">▶ Play</button>
+        <button class="ctrl-btn" onclick="resetPreview()">⏮ Reset</button>
+        <span class="ctrl-time" id="ptime">0:00 / 0:00</span>
+      </div>
+
+      <!-- Text overlays -->
+      <div class="txt-panel">
+        <h4>Text Overlays</h4>
+        <div class="txt-grp"><label>Hook (first 3s)</label><input id="hook-txt" placeholder="e.g. You won't believe this..." oninput="updOvr()"></div>
+        <div class="txt-grp"><label>CTA (last 5s)</label><input id="cta-txt" placeholder="e.g. Call Superior Plumbing" oninput="updOvr()"></div>
+        <div class="txt-grp"><label>Video Title</label><input id="vid-title" placeholder="e.g. 6AM start as a plumber"></div>
+      </div>
+
+      <!-- AI Recommendations -->
+      <div class="ai-rec" id="ai-rec" style="display:none">
+        <h4>🤖 AI Recommendation</h4>
+        <div class="rec-item"><div class="rec-label">Suggested Template</div><div class="rec-val" id="rec-tmpl">—</div></div>
+        <div class="rec-item"><div class="rec-label">Content Pillar</div><div class="rec-val" id="rec-pillar">—</div></div>
+        <div class="rec-item"><div class="rec-label">Best Hook Moment</div><div class="rec-val" id="rec-hook">—</div></div>
+        <div class="rec-item"><div class="rec-label">Suggested Hook Text</div><div class="rec-val" id="rec-hook-txt">—</div></div>
+        <button class="rec-action" onclick="applyAIRec()">Apply AI Recommendation</button>
+      </div>
+    </div>
+
+    <!-- Queue -->
+    <div class="queue" id="tab-queue" style="display:none">
+      <div class="q-header">
+        <h3 style="font-size:15px;">May 2026 — 30 Video Production Queue</h3>
+        <div class="q-legend">
+          <span style="color:var(--green)">Ready</span>
+          <span style="color:var(--orange)">In Progress</span>
+          <span style="color:var(--muted)">Not Started</span>
+        </div>
+      </div>
+      <div id="qlist"></div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline">
+      <div class="tl-header">
+        <h3 id="tl-title">Select a template to begin</h3>
+        <div class="tl-header-btns">
+          <button onclick="clearTL()">Clear</button>
+          <button onclick="autoFillAI()" id="ai-fill-btn" style="display:none">🤖 AI Auto-Fill</button>
+          <button class="save" onclick="saveToQueue()">Save to Queue ✓</button>
+        </div>
+      </div>
+      <div class="tl-tracks" id="tl-tracks">
+        <div class="tl-empty">← Pick a template, then drag clips into segments below</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════
+const CONFIG = {
+  gapi: { key: '', clientId: '', folderId: '', connected: false },
+  ai: { provider: 'none', key: '', enabled: false },
+};
+
+// ═══════════════════════════════════════
+// TEMPLATES
+// ═══════════════════════════════════════
+const TEMPLATES = [
+  { id:'quick-tip', name:'Quick Tip', dur:'30s', color:'#27AE60', icon:'💡',
+    segments:[
+      {name:'Hook',dur:3,color:'#E74C3C',desc:'Attention-grab opening'},
+      {name:'Problem',dur:7,color:'#E67E22',desc:'The common mistake'},
+      {name:'Solution',dur:15,color:'#27AE60',desc:'Show the fix'},
+      {name:'CTA',dur:5,color:'#2E75B6',desc:'Call to action'},
+    ]},
+  { id:'before-after', name:'Before & After', dur:'15-30s', color:'#E67E22', icon:'🔄',
+    segments:[
+      {name:'Hook / Before',dur:5,color:'#E74C3C',desc:'Show the problem'},
+      {name:'The Work',dur:12,color:'#E67E22',desc:'Timelapse of the fix'},
+      {name:'Reveal + CTA',dur:8,color:'#27AE60',desc:'Satisfying after'},
+    ]},
+  { id:'day-in-life', name:'Day in the Life', dur:'45-60s', color:'#2E75B6', icon:'🌅',
+    segments:[
+      {name:'Morning',dur:8,color:'#F1C40F',desc:'Alarm, coffee, truck'},
+      {name:'Job 1',dur:12,color:'#2E75B6',desc:'First job'},
+      {name:'Job 2',dur:12,color:'#8E44AD',desc:'Second highlight'},
+      {name:'Midday',dur:8,color:'#E67E22',desc:'Lunch, funny moment'},
+      {name:'Wrap-up',dur:8,color:'#27AE60',desc:'End of day'},
+    ]},
+  { id:'testimonial', name:'Customer Testimonial', dur:'15-30s', color:'#8E44AD', icon:'⭐',
+    segments:[
+      {name:'Your Intro',dur:5,color:'#2E75B6',desc:'"We just finished..."'},
+      {name:'Customer Speaks',dur:15,color:'#8E44AD',desc:'Natural testimonial'},
+      {name:'Your Close',dur:5,color:'#27AE60',desc:'Sign off + number'},
+    ]},
+  { id:'trending', name:'Trending / Culture', dur:'15-30s', color:'#F1C40F', icon:'🔥',
+    segments:[
+      {name:'Hook',dur:5,color:'#E74C3C',desc:'Trending audio/visual'},
+      {name:'Content',dur:15,color:'#F1C40F',desc:'The moment'},
+      {name:'Tag + CTA',dur:5,color:'#2E75B6',desc:'Follow CTA'},
+    ]},
+];
+
+const QUEUE_DATA = [
+  {day:1,title:'6 AM start as a plumber',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:2,title:'How to shut off your water main',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:3,title:'Clogged drain → flowing free',pillar:'Before & After',tmpl:'before-after'},
+  {day:4,title:'What our customers really think',pillar:'Social Proof',tmpl:'testimonial'},
+  {day:5,title:'Meet the Superior Plumbing team',pillar:'Personality',tmpl:'trending'},
+  {day:6,title:'3 signs your water heater is failing',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:7,title:'Week 1 recap — best highlights',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:8,title:'The nastiest clog this week',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:9,title:'Stop putting this down your drain',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:10,title:'Full bathroom fixture upgrade',pillar:'Before & After',tmpl:'before-after'},
+  {day:11,title:'Reading our Google reviews',pillar:'Social Proof',tmpl:'testimonial'},
+  {day:12,title:'Plumber vs. trending challenge',pillar:'Personality',tmpl:'trending'},
+  {day:13,title:'Water heater swap in 4 hours',pillar:'Before & After',tmpl:'before-after'},
+  {day:14,title:'Ride along to emergency call',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:15,title:'A day with our newest tech',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:16,title:'Is your toilet running? Test it',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:17,title:'Slab leak repair reveal',pillar:'Before & After',tmpl:'before-after'},
+  {day:18,title:'5 years serving the community',pillar:'Social Proof',tmpl:'testimonial'},
+  {day:19,title:'Funniest moment on the job',pillar:'Personality',tmpl:'trending'},
+  {day:20,title:'Cost of ignoring a small leak',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:21,title:'End of day truck cleanup',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:22,title:'POV: crawl space walkthrough',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:23,title:'When to DIY vs. call a pro',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:24,title:'Kitchen sink: builder to custom',pillar:'Before & After',tmpl:'before-after'},
+  {day:25,title:'Repeat customer interview',pillar:'Social Proof',tmpl:'testimonial'},
+  {day:26,title:"What's in my plumbing truck?",pillar:'Personality',tmpl:'trending'},
+  {day:27,title:'What plumbers wish you knew',pillar:'Tips & Education',tmpl:'quick-tip'},
+  {day:28,title:'50-year-old pipe re-pipe',pillar:'Before & After',tmpl:'before-after'},
+  {day:29,title:'First call vs last call energy',pillar:'Day in the Life',tmpl:'day-in-life'},
+  {day:30,title:'The job that made my month',pillar:'Day in the Life',tmpl:'day-in-life'},
+];
+
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+let clips = [];
+let selTmpl = null;
+let segClips = {};
+let queue = QUEUE_DATA.map(q => ({...q, status:'empty', segs:{}, hook:'', cta:''}));
+let curQIdx = -1;
+let playing = false;
+let playIdx = 0;
+let playTimer = null;
+
+// ═══════════════════════════════════════
+// WIZARD
+// ═══════════════════════════════════════
+function wizNext(step, skip) {
+  document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
+  if (step > 3 || skip) { launchApp(); return; }
+  document.getElementById('wiz-'+step).classList.add('active');
+}
+
+function showWizard() {
+  document.getElementById('wizard').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('app-header').style.display = 'none';
+}
+
+function testDriveConnection() {
+  const key = document.getElementById('gapi-key').value.trim();
+  const clientId = document.getElementById('gclient-id').value.trim();
+  const folderId = document.getElementById('gdrive-folder').value.trim();
+  const status = document.getElementById('drive-status');
+
+  if (!key || !clientId) {
+    status.innerHTML = '<div class="wiz-status error">Please enter both API Key and Client ID.</div>';
+    return;
+  }
+
+  CONFIG.gapi = { key, clientId, folderId, connected: true };
+  status.innerHTML = '<div class="wiz-status success">✓ Credentials saved. Google Drive will connect when you launch the studio.</div>';
+  setTimeout(() => wizNext(3), 1500);
+}
+
+function updateAIFields() {
+  const provider = document.getElementById('ai-provider').value;
+  document.getElementById('ai-key-group').style.display = provider === 'none' ? 'none' : 'block';
+}
+
+function saveAIConfig() {
+  const provider = document.getElementById('ai-provider').value;
+  const key = document.getElementById('ai-key').value.trim();
+
+  if (provider !== 'none' && !key) {
+    document.getElementById('ai-status').innerHTML = '<div class="wiz-status error">Please enter your API key.</div>';
+    return;
+  }
+
+  CONFIG.ai = { provider, key, enabled: provider !== 'none' };
+  launchApp();
+}
+
+function launchApp() {
+  document.getElementById('wizard').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('app-header').style.display = 'flex';
+
+  // Update badges
+  if (CONFIG.gapi.connected) {
+    document.getElementById('drive-badge').className = 'conn-badge on';
+    document.getElementById('drive-badge').textContent = '● Drive: Connected';
+    document.getElementById('drive-pull-btn').disabled = false;
+  }
+  if (CONFIG.ai.enabled) {
+    document.getElementById('ai-badge').className = 'conn-badge on';
+    document.getElementById('ai-badge').textContent = '● AI: ' + CONFIG.ai.provider.toUpperCase();
+    document.getElementById('ai-fill-btn').style.display = 'inline-block';
+  }
+
+  renderTmpls();
+  renderQueue();
+  updateStats();
+}
+
+// ═══════════════════════════════════════
+// GOOGLE DRIVE
+// ═══════════════════════════════════════
+async function pullFromDrive() {
+  if (!CONFIG.gapi.connected) {
+    alert('Connect Google Drive in Setup first.');
+    return;
+  }
+
+  const btn = document.getElementById('drive-pull-btn');
+  btn.textContent = '⏳ Connecting to Google Drive...';
+  btn.disabled = true;
+
+  try {
+    await new Promise((resolve, reject) => {
+      gapi.load('client:picker', async () => {
+        try {
+          await gapi.client.init({ apiKey: CONFIG.gapi.key, discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+
+          const tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CONFIG.gapi.clientId,
+            scope: 'https://www.googleapis.com/auth/drive.readonly',
+            callback: async (tokenResponse) => {
+              if (tokenResponse.error) {
+                console.error('OAuth error:', tokenResponse);
+                reject(new Error(`OAuth error: ${tokenResponse.error} — ${tokenResponse.error_description || ''}`));
+                return;
+              }
+
+              btn.textContent = '⏳ Scanning for video files...';
+
+              // Detect if folder ID is a Shared Drive (starts with 0A)
+              const fid = CONFIG.gapi.folderId;
+              const isSharedDrive = fid && fid.startsWith('0A');
+              let allFiles = [];
+
+              try {
+                if (isSharedDrive) {
+                  // Shared Drive: list all video files in the drive
+                  console.log('Detected Shared Drive, using corpora=drive with driveId:', fid);
+                  let pageToken = null;
+                  do {
+                    const params = {
+                      q: "mimeType contains 'video/'",
+                      fields: 'nextPageToken, files(id,name,mimeType,size,createdTime,thumbnailLink,parents)',
+                      pageSize: 100,
+                      supportsAllDrives: true,
+                      includeItemsFromAllDrives: true,
+                      corpora: 'drive',
+                      driveId: fid,
+                    };
+                    if (pageToken) params.pageToken = pageToken;
+                    const response = await gapi.client.drive.files.list(params);
+                    const files = response.result.files || [];
+                    allFiles = allFiles.concat(files);
+                    pageToken = response.result.nextPageToken;
+                  } while (pageToken);
+                } else if (fid) {
+                  // Regular folder
+                  let pageToken = null;
+                  do {
+                    const params = {
+                      q: `'${fid}' in parents and mimeType contains 'video/'`,
+                      fields: 'nextPageToken, files(id,name,mimeType,size,createdTime,thumbnailLink)',
+                      pageSize: 100,
+                      supportsAllDrives: true,
+                      includeItemsFromAllDrives: true,
+                    };
+                    if (pageToken) params.pageToken = pageToken;
+                    const response = await gapi.client.drive.files.list(params);
+                    const files = response.result.files || [];
+                    allFiles = allFiles.concat(files);
+                    pageToken = response.result.nextPageToken;
+                  } while (pageToken);
+                } else {
+                  // No folder specified, search all accessible videos
+                  const response = await gapi.client.drive.files.list({
+                    q: "mimeType contains 'video/'",
+                    fields: 'files(id,name,mimeType,size,createdTime,thumbnailLink)',
+                    pageSize: 50,
+                    supportsAllDrives: true,
+                    includeItemsFromAllDrives: true,
+                  });
+                  allFiles = response.result.files || [];
+                }
+              } catch (listErr) {
+                console.error('Drive list error:', listErr);
+                reject(new Error(`Failed to list files: ${listErr?.result?.error?.message || listErr.message || JSON.stringify(listErr)}`));
+                return;
+              }
+
+              console.log(`Found ${allFiles.length} video files`);
+              btn.textContent = `📁 Found ${allFiles.length} clips — downloading...`;
+
+              if (allFiles.length === 0) {
+                btn.textContent = '⚠️ No video files found in this folder';
+                btn.disabled = false;
+                setTimeout(() => { btn.textContent = '📁 Pull from Google Drive'; }, 4000);
+                resolve();
+                return;
+              }
+
+              // Download each file
+              let loaded = 0;
+              for (const file of allFiles) {
+                try {
+                  loaded++;
+                  btn.textContent = `⏳ Loading ${loaded}/${allFiles.length}: ${file.name}`;
+                  const fileResponse = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`,
+                    { headers: { Authorization: `Bearer ${tokenResponse.access_token}` } }
+                  );
+                  if (!fileResponse.ok) {
+                    console.warn(`Skipping ${file.name}: HTTP ${fileResponse.status}`);
+                    continue;
+                  }
+                  const blob = await fileResponse.blob();
+                  const url = URL.createObjectURL(blob);
+                  await loadClipFromUrl(url, file.name);
+                } catch (dlErr) {
+                  console.warn(`Failed to download ${file.name}:`, dlErr);
+                }
+              }
+
+              resolve();
+            }
+          });
+          tokenClient.requestAccessToken();
+        } catch (e) {
+          console.error('GAPI init error:', e);
+          reject(e);
+        }
+      });
+    });
+  } catch (e) {
+    console.error('Drive error:', e);
+    const errMsg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e));
+    btn.textContent = `❌ ${errMsg.substring(0, 60)}`;
+    setTimeout(() => { btn.textContent = '📁 Pull from Google Drive'; btn.disabled = false; }, 5000);
+    return;
+  }
+
+  btn.textContent = `✓ ${clips.length} clips loaded from Drive`;
+  btn.disabled = false;
+  setTimeout(() => { btn.textContent = '📁 Pull from Google Drive'; }, 3000);
+}
+
+function loadClipFromUrl(url, name) {
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.src = url;
+    v.onloadedmetadata = () => {
+      const clip = { id: 'c-'+Date.now()+'-'+Math.random().toString(36).substr(2,4), name, url, duration: v.duration, tags: [], aiAnalysis: null };
+      clips.push(clip);
+      if (CONFIG.ai.enabled) analyzeClipAI(clip);
+      else clip.tags = guessTagsFromName(name);
+      renderClips();
+      updateStats();
+      resolve();
+    };
+    v.onerror = resolve;
+  });
+}
+
+// ═══════════════════════════════════════
+// AI ANALYSIS
+// ═══════════════════════════════════════
+function guessTagsFromName(name) {
+  const n = name.toLowerCase();
+  const tags = [];
+  const rules = [
+    ['Day in the Life', ['morning','truck','drive','pov','crawl','day','6am','cleanup','ride','load']],
+    ['Tips & Education', ['tip','how','fix','prevent','shut','valve','test','diy','cost','sign','water heater']],
+    ['Before & After', ['before','after','clog','drain','install','swap','repair','transform','pipe','leak']],
+    ['Social Proof', ['customer','review','testimonial','thank','star','google','repeat']],
+    ['Personality', ['funny','team','meet','challenge','truck tour','what\'s in','humor','laugh']],
+  ];
+  for (const [pillar, kws] of rules) {
+    if (kws.some(k => n.includes(k))) tags.push(pillar);
+  }
+  return tags.length ? tags : ['Unclassified'];
+}
+
+async function analyzeClipAI(clip) {
+  if (!CONFIG.ai.enabled) return;
+
+  // Extract a frame for visual analysis
+  const canvas = document.createElement('canvas');
+  const video = document.createElement('video');
+  video.src = clip.url;
+  video.currentTime = Math.min(2, clip.duration / 3);
+
+  await new Promise(r => { video.onseeked = r; video.load(); });
+  canvas.width = 320; canvas.height = 568;
+  canvas.getContext('2d').drawImage(video, 0, 0, 320, 568);
+  const frameData = canvas.toDataURL('image/jpeg', 0.6);
+
+  const prompt = `You are an expert social media video editor analyzing raw footage for "Superior Plumbing" — a local plumbing company creating 30 short-form marketing videos per month for TikTok, Instagram Reels, Facebook, and YouTube Shorts.
+
+CONTEXT: The team films with Meta Ray-Ban glasses and smartphones during real jobs. Footage includes: arriving at jobs, working under sinks/crawlspaces, fixing pipes/drains/water heaters, before/after shots, team moments, truck shots, customer interactions, and funny moments.
+
+VIDEO METADATA:
+- Filename: "${clip.name}"
+- Duration: ${clip.duration.toFixed(1)} seconds
+
+ANALYZE this frame and classify the content. Think about:
+1. What's physically happening (tools, pipes, water, hands working, driving, talking)
+2. The setting (under a sink, bathroom, kitchen, crawlspace, truck, outside a house)
+3. Whether this shows a problem, a process, or a result
+4. The energy/mood (satisfying fix, gross clog, educational demo, team fun)
+
+Return this exact JSON:
+{
+  "pillar": "one of: Day in the Life | Tips & Education | Before & After | Social Proof | Personality",
+  "template": "one of: quick-tip | before-after | day-in-life | testimonial | trending",
+  "confidence": 0.0-1.0,
+  "content_description": "2-3 sentence description of what this clip shows",
+  "suggested_hook": "a scroll-stopping hook line under 10 words, conversational tone",
+  "key_moment_start": best starting second for the most engaging moment,
+  "key_moment_end": end second of that moment,
+  "trim_suggestions": {
+    "hook_start": best second to start a 3-second hook,
+    "content_start": best second to start the main content,
+    "reveal_start": best second for the payoff/reveal/result,
+    "cta_start": best second for a clean ending frame
+  },
+  "mood": "one of: satisfying | dramatic | educational | funny | wholesome | professional | gross-but-satisfying",
+  "viral_potential": "low | medium | high",
+  "viral_reason": "why this could go viral or not, in one sentence",
+  "tags": ["descriptive", "tags", "for", "this", "clip"],
+  "best_text_overlay": "suggested text to overlay on the video",
+  "music_mood": "one of: upbeat | chill | dramatic | funny | motivational"
+}`;
+
+  try {
+    let response;
+    if (CONFIG.ai.provider === 'openai') {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: frameData } }
+          ]}],
+          max_tokens: 500,
+          response_format: { type: 'json_object' },
+        })
+      });
+      const data = await response.json();
+      clip.aiAnalysis = JSON.parse(data.choices[0].message.content);
+    } else if (CONFIG.ai.provider === 'anthropic') {
+      const base64 = frameData.split(',')[1];
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': CONFIG.ai.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+            { type: 'text', text: prompt }
+          ]}]
+        })
+      });
+      const data = await response.json();
+      const text = data.content[0].text;
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      clip.aiAnalysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    } else if (CONFIG.ai.provider === 'gemini') {
+      const base64 = frameData.split(',')[1];
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${CONFIG.ai.key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [
+            { text: prompt },
+            { inline_data: { mime_type: 'image/jpeg', data: base64 } }
+          ]}],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      });
+      const data = await response.json();
+      clip.aiAnalysis = JSON.parse(data.candidates[0].content.parts[0].text);
+    }
+
+    if (clip.aiAnalysis) {
+      clip.tags = [clip.aiAnalysis.pillar];
+      if (clip.aiAnalysis.mood) clip.tags.push(clip.aiAnalysis.mood);
+      if (clip.aiAnalysis.viral_potential === 'high') clip.tags.push('🔥 viral');
+      console.log(`AI analyzed "${clip.name}": ${clip.aiAnalysis.pillar} / ${clip.aiAnalysis.template} (${(clip.aiAnalysis.confidence*100).toFixed(0)}% conf, ${clip.aiAnalysis.viral_potential} viral)`);
+    }
+  } catch (e) {
+    console.error('AI analysis failed for', clip.name, ':', e?.message || e);
+    clip.tags = guessTagsFromName(clip.name);
+  }
+
+  renderClips();
+}
+
+async function autoFillAI() {
+  if (!selTmpl || clips.length === 0) return;
+
+  const btn = document.getElementById('ai-fill-btn');
+  btn.textContent = '🤖 AI analyzing clips...';
+  btn.disabled = true;
+
+  // Score each clip for this template
+  const scored = clips.map(c => {
+    let score = 0;
+    const ai = c.aiAnalysis;
+    const used = Object.values(segClips).some(s => s.clipId === c.id);
+    if (used) score -= 100; // avoid reusing clips
+
+    if (ai) {
+      if (ai.template === selTmpl.id) score += 50;
+      if (ai.pillar === templatePillarMap[selTmpl.id]) score += 30;
+      if (ai.viral_potential === 'high') score += 15;
+      if (ai.viral_potential === 'medium') score += 5;
+      if (ai.confidence) score += ai.confidence * 10;
+      // Prefer clips long enough for the template
+      const totalDur = selTmpl.segments.reduce((s,seg) => s+seg.dur, 0);
+      if (c.duration >= totalDur * 0.5) score += 10;
+    } else {
+      // Filename-based scoring
+      const tags = guessTagsFromName(c.name);
+      const pillar = templatePillarMap[selTmpl.id];
+      if (tags.includes(pillar)) score += 20;
+    }
+    return { clip: c, score };
+  }).sort((a,b) => b.score - a.score);
+
+  // Smart segment filling based on template type
+  selTmpl.segments.forEach((seg, i) => {
+    if (segClips[i]) return;
+    const available = scored.filter(s => !Object.values(segClips).some(sc => sc.clipId === s.clip.id));
+    if (available.length === 0) return;
+
+    const clip = available[0].clip;
+    const ai = clip.aiAnalysis;
+    let trimStart = 0, trimEnd = seg.dur;
+
+    if (ai) {
+      // Smart trimming using AI trim_suggestions if available
+      const segName = seg.name.toLowerCase();
+      const ts = ai.trim_suggestions || {};
+
+      if (segName.includes('hook') || segName.includes('intro')) {
+        trimStart = ts.hook_start ?? ai.key_moment_start ?? 0;
+        trimEnd = Math.min(trimStart + seg.dur, clip.duration);
+      } else if (segName.includes('reveal') || segName.includes('after') || segName.includes('result')) {
+        trimStart = ts.reveal_start ?? Math.max(0, clip.duration - seg.dur - 1);
+        trimEnd = Math.min(trimStart + seg.dur, clip.duration);
+      } else if (segName.includes('process') || segName.includes('work') || segName.includes('content') || segName.includes('demo') || segName.includes('tip')) {
+        trimStart = ts.content_start ?? (clip.duration / 2 - seg.dur / 2);
+        trimStart = Math.max(0, trimStart);
+        trimEnd = Math.min(trimStart + seg.dur, clip.duration);
+      } else if (segName.includes('cta') || segName.includes('call') || segName.includes('end')) {
+        trimStart = ts.cta_start ?? Math.max(0, clip.duration - seg.dur);
+        trimEnd = Math.min(trimStart + seg.dur, clip.duration);
+      } else if (segName.includes('before')) {
+        // Before segment: use the very beginning
+        trimStart = 0;
+        trimEnd = Math.min(seg.dur, clip.duration);
+      } else if (segName.includes('story') || segName.includes('reaction') || segName.includes('moment')) {
+        trimStart = ai.key_moment_start ?? 0;
+        trimEnd = Math.min(trimStart + seg.dur, clip.duration);
+      } else {
+        trimStart = ai.key_moment_start ?? 0;
+        trimEnd = Math.min(trimStart + seg.dur, clip.duration);
+      }
+    } else {
+      // No AI: use beginning of clip, trimmed to segment duration
+      trimEnd = Math.min(seg.dur, clip.duration);
+    }
+
+    segClips[i] = { clipId: clip.id, trimStart, trimEnd };
+  });
+
+  // Auto-fill text overlays from AI
+  const firstClip = segClips[0] && clips.find(c => c.id === segClips[0].clipId);
+  if (firstClip?.aiAnalysis?.suggested_hook) {
+    document.getElementById('hook-txt').value = firstClip.aiAnalysis.suggested_hook;
+  }
+
+  // Auto-suggest CTA based on template type
+  const ctaMap = {
+    'quick-tip': 'Follow for more plumbing tips!',
+    'before-after': 'Call Superior Plumbing today!',
+    'day-in-life': 'A day with Superior Plumbing 🔧',
+    'testimonial': 'Book your service now!',
+    'trending': 'Superior Plumbing gets it done 💪',
+  };
+  if (!document.getElementById('cta-txt').value) {
+    document.getElementById('cta-txt').value = ctaMap[selTmpl.id] || 'Call Superior Plumbing';
+  }
+
+  // Auto-suggest title
+  if (!document.getElementById('title-txt').value && firstClip?.aiAnalysis?.content_description) {
+    document.getElementById('title-txt').value = firstClip.aiAnalysis.content_description.substring(0, 50);
+  }
+
+  btn.textContent = '🤖 AI Auto-Fill';
+  btn.disabled = false;
+  renderTL();
+  updPreview();
+}
+
+// Map template IDs to content pillars for smart matching
+const templatePillarMap = {
+  'quick-tip': 'Tips & Education',
+  'before-after': 'Before & After',
+  'day-in-life': 'Day in the Life',
+  'testimonial': 'Social Proof',
+  'trending': 'Personality',
+};
+
+function applyAIRec() {
+  // Apply the AI recommendation shown in the panel
+  const recTmpl = document.getElementById('rec-tmpl').dataset.id;
+  const recHook = document.getElementById('rec-hook-txt').textContent;
+  if (recTmpl) selectTmpl(recTmpl);
+  if (recHook && recHook !== '—') document.getElementById('hook-txt').value = recHook;
+  updOvr();
+}
+
+// ═══════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════
+const PC = {'Day in the Life':'#2E75B6','Tips & Education':'#27AE60','Before & After':'#E67E22','Social Proof':'#8E44AD','Personality':'#F1C40F','Unclassified':'#888'};
+
+function renderTmpls() {
+  document.getElementById('tmpl-list').innerHTML = TEMPLATES.map(t => `
+    <div class="tmpl-card ${selTmpl?.id===t.id?'active':''}" onclick="selectTmpl('${t.id}')">
+      <div class="tmpl-name">${t.icon} ${t.name}</div>
+      <div class="tmpl-meta"><span class="tmpl-badge" style="background:${t.color}">${t.segments.length} segs</span> ${t.dur}</div>
+    </div>`).join('');
+}
+
+function selectTmpl(id) {
+  selTmpl = TEMPLATES.find(t=>t.id===id);
+  segClips = {};
+  renderTmpls();
+  renderTL();
+  updPreview();
+}
+
+function renderTL() {
+  const c = document.getElementById('tl-tracks');
+  const t = document.getElementById('tl-title');
+  if (!selTmpl) { c.innerHTML = '<div class="tl-empty">← Pick a template, then drag clips into segments</div>'; t.textContent='Select a template'; return; }
+  t.textContent = `${selTmpl.icon} ${selTmpl.name} — Timeline`;
+
+  c.innerHTML = selTmpl.segments.map((s,i) => {
+    const cd = segClips[i];
+    const cl = cd ? clips.find(x=>x.id===cd.clipId) : null;
+    return `<div class="tl-seg" id="seg-${i}" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="dropSeg(event,${i})">
+      <div class="tl-seg-head"><span class="tl-seg-name" style="color:${s.color}">${s.name}</span><span class="tl-seg-dur">${s.dur}s</span></div>
+      <div class="tl-drop ${cl?'filled':''}">
+        ${cl ? `<div class="tl-clip-in"><video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video><div class="tl-clip-meta"><div class="tl-clip-name">${cl.name}</div><div class="tl-clip-trim">${fmtT(cd.trimStart)} – ${fmtT(cd.trimEnd)}</div></div><button class="tl-clip-rm" onclick="rmSeg(${i})">✕</button></div>
+        <div class="tl-trim">
+          <div class="tl-trim-row"><label>In</label><input type="range" min="0" max="${Math.floor(cl.duration*100)}" value="${Math.floor(cd.trimStart*100)}" oninput="setTrim(${i},'s',this.value/100)"><span class="tv">${fmtT(cd.trimStart)}</span></div>
+          <div class="tl-trim-row"><label>Out</label><input type="range" min="0" max="${Math.floor(cl.duration*100)}" value="${Math.floor(cd.trimEnd*100)}" oninput="setTrim(${i},'e',this.value/100)"><span class="tv">${fmtT(cd.trimEnd)}</span></div>
+        </div>` : 'Drop clip here'}
+      </div></div>`;
+  }).join('');
+}
+
+function renderClips() {
+  const g = document.getElementById('cgrid');
+  g.innerHTML = clips.map(cl => {
+    const mainTag = cl.tags[0] || 'Unclassified';
+    const ai = cl.aiAnalysis;
+    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}">
+      <video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video>
+      <span class="c-dur">${fmtT(cl.duration)}</span>
+      <span class="c-tag" style="background:${PC[mainTag]||'#888'}">${mainTag}</span>
+      <button class="c-rm" onclick="rmClip('${cl.id}')">✕</button>
+      ${ai ? `<div class="c-ai"><div class="c-ai-tags">${(ai.tags||[]).slice(0,3).map(t=>`<span class="c-ai-tag">${t}</span>`).join('')}${ai.viral_potential?`<span class="c-ai-tag" style="background:${ai.viral_potential==='high'?'rgba(39,174,96,.4)':'rgba(255,255,255,.1)'}">${ai.viral_potential} viral</span>`:''}</div></div>` : ''}
+      <div class="c-name">${cl.name}</div>
+    </div>`;
+  }).join('');
+
+  // AI summary
+  const sum = document.getElementById('ai-sum');
+  if (clips.length === 0) { sum.innerHTML = ''; return; }
+  const tc = {};
+  clips.forEach(c => c.tags.forEach(t => { if(PC[t]) tc[t]=(tc[t]||0)+1; }));
+  const analyzed = clips.filter(c => c.aiAnalysis).length;
+
+  sum.innerHTML = `<div class="ai-summary">
+    <h4>🤖 Footage Analysis${CONFIG.ai.enabled?'':' (filename-based)'}</h4>
+    <div>${Object.entries(tc).map(([t,n])=>`<span class="ai-pill" style="background:${PC[t]}33;color:${PC[t]}">${t}: ${n}</span>`).join('')}</div>
+    ${CONFIG.ai.enabled ? `<div style="margin-top:6px;"><div class="ai-bar" style="background:linear-gradient(90deg,var(--green) ${analyzed/clips.length*100}%,var(--border) ${analyzed/clips.length*100}%)"></div><div style="font-size:9px;color:var(--muted);margin-top:2px;">${analyzed}/${clips.length} clips analyzed by AI</div></div>` : ''}
+    <div class="ai-suggestion"><strong>Suggestion:</strong> You have enough footage for ${Object.keys(tc).length} content pillars. ${clips.length>=7?'Ready to start assembling videos!':'Upload more clips to fill the month.'}</div>
+  </div>`;
+
+  // Show AI rec panel if a clip is selected/available
+  if (clips.length > 0 && clips[clips.length-1].aiAnalysis) {
+    const latest = clips[clips.length-1];
+    const ai = latest.aiAnalysis;
+    const recPanel = document.getElementById('ai-rec');
+    recPanel.style.display = 'block';
+    document.getElementById('rec-tmpl').textContent = TEMPLATES.find(t=>t.id===ai.template)?.name || ai.template;
+    document.getElementById('rec-tmpl').dataset.id = ai.template;
+    document.getElementById('rec-pillar').textContent = ai.pillar;
+    document.getElementById('rec-hook').textContent = ai.key_moment_start != null ? `${fmtT(ai.key_moment_start)} – ${fmtT(ai.key_moment_end)}` : '—';
+    document.getElementById('rec-hook-txt').textContent = ai.suggested_hook || '—';
+  }
+}
+
+function renderQueue() {
+  document.getElementById('qlist').innerHTML = queue.map((q,i) => {
+    const d = new Date(2026,4,q.day);
+    const dn = d.toLocaleDateString('en-US',{weekday:'short'});
+    const sc = q.status==='ready'?'ready':q.status==='partial'?'partial':'empty';
+    const st = q.status==='ready'?'Ready':q.status==='partial'?'In Progress':'Not Started';
+    return `<div class="q-item" onclick="loadQueue(${i})"><div class="q-num">${q.day}</div><div class="q-info"><div class="q-title">${q.title}</div><div class="q-sub">${dn} May ${q.day} · ${q.pillar}</div></div><span class="q-badge ${sc}">${st}</span></div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+// INTERACTIONS
+// ═══════════════════════════════════════
+function addFiles(files) {
+  Array.from(files).forEach(f => {
+    if (!f.type.startsWith('video/')) return;
+    const url = URL.createObjectURL(f);
+    loadClipFromUrl(url, f.name);
+  });
+}
+
+function rmClip(id) {
+  clips = clips.filter(c=>c.id!==id);
+  Object.keys(segClips).forEach(k => { if(segClips[k]?.clipId===id) delete segClips[k]; });
+  renderClips(); renderTL(); updateStats();
+}
+
+function dropSeg(e, i) {
+  e.preventDefault(); e.currentTarget.classList.remove('over');
+  const id = e.dataTransfer.getData('text');
+  const cl = clips.find(c=>c.id===id);
+  if (!cl||!selTmpl) return;
+  const seg = selTmpl.segments[i];
+  const start = cl.aiAnalysis?.key_moment_start || 0;
+  segClips[i] = { clipId:cl.id, trimStart:start, trimEnd:Math.min(start+seg.dur, cl.duration) };
+  renderTL(); updPreview();
+}
+
+function rmSeg(i) { delete segClips[i]; renderTL(); updPreview(); }
+
+function setTrim(i,type,val) {
+  if (!segClips[i]) return;
+  val = parseFloat(val);
+  if (type==='s') { segClips[i].trimStart=val; if(val>=segClips[i].trimEnd) segClips[i].trimEnd=val+0.5; }
+  else { segClips[i].trimEnd=val; if(val<=segClips[i].trimStart) segClips[i].trimStart=Math.max(0,val-0.5); }
+  renderTL();
+}
+
+function clearTL() { segClips={}; renderTL(); updPreview(); }
+
+function saveToQueue() {
+  if (!selTmpl||!Object.keys(segClips).length) { alert('Add clips to the timeline first.'); return; }
+  let idx = curQIdx>=0 ? curQIdx : queue.findIndex(q=>q.tmpl===selTmpl.id&&q.status!=='ready');
+  if (idx<0) idx = queue.findIndex(q=>q.status!=='ready');
+  if (idx<0) { alert('All 30 videos complete!'); return; }
+
+  const filled = Object.keys(segClips).length;
+  queue[idx].status = filled>=selTmpl.segments.length ? 'ready' : 'partial';
+  queue[idx].segs = {...segClips};
+  queue[idx].hook = document.getElementById('hook-txt').value;
+  queue[idx].cta = document.getElementById('cta-txt').value;
+  queue[idx].tmplUsed = selTmpl.id;
+  curQIdx = -1;
+  updateStats(); renderQueue();
+  segClips = {};
+  document.getElementById('hook-txt').value='';
+  document.getElementById('cta-txt').value='';
+  document.getElementById('vid-title').value='';
+  renderTL(); updPreview();
+  alert(`✓ Saved "${queue[idx].title}" to queue!`);
+}
+
+function loadQueue(i) {
+  const q = queue[i]; curQIdx = i;
+  const t = TEMPLATES.find(x=>x.id===(q.tmplUsed||q.tmpl));
+  if (t) {
+    selTmpl=t; segClips=q.segs?{...q.segs}:{};
+    document.getElementById('hook-txt').value=q.hook||'';
+    document.getElementById('cta-txt').value=q.cta||'';
+    document.getElementById('vid-title').value=q.title||'';
+    renderTmpls(); renderTL(); updPreview(); setTab('editor');
+  }
+}
+
+// ═══════════════════════════════════════
+// PREVIEW
+// ═══════════════════════════════════════
+function updPreview() {
+  const v=document.getElementById('pvid'), em=document.getElementById('phone-empty'), ov=document.getElementById('ovr');
+  const cd = segClips[0];
+  if (cd) {
+    const cl = clips.find(c=>c.id===cd.clipId);
+    if (cl) { v.src=cl.url; v.currentTime=cd.trimStart; v.style.display='block'; em.style.display='none'; ov.style.display='flex'; updOvr(); return; }
+  }
+  v.style.display='none'; em.style.display='flex'; ov.style.display='none';
+}
+
+function updOvr() {
+  document.getElementById('o-hook').textContent = document.getElementById('hook-txt').value || 'Hook text here';
+  document.getElementById('o-cta').textContent = document.getElementById('cta-txt').value || '📞 Call Superior Plumbing';
+}
+
+function playPreview() {
+  const v = document.getElementById('pvid');
+  if (!selTmpl||!Object.keys(segClips).length) return;
+  if (playing) { v.pause(); playing=false; document.getElementById('play-btn').textContent='▶ Play'; clearTimeout(playTimer); return; }
+  playing=true; document.getElementById('play-btn').textContent='⏸ Pause'; playIdx=0; playNext();
+}
+
+function playNext() {
+  if (!playing||playIdx>=selTmpl.segments.length) { playing=false; document.getElementById('play-btn').textContent='▶ Play'; return; }
+  const cd=segClips[playIdx];
+  if (!cd) { playIdx++; playNext(); return; }
+  const cl=clips.find(c=>c.id===cd.clipId);
+  if (!cl) { playIdx++; playNext(); return; }
+  const v=document.getElementById('pvid');
+  v.src=cl.url; v.currentTime=cd.trimStart; v.muted=false; v.play();
+  selTmpl.segments.forEach((_,i)=>{ const el=document.getElementById('seg-'+i); if(el) el.style.borderColor=i===playIdx?'var(--blue)':'var(--border)'; });
+  playTimer = setTimeout(()=>{ v.pause(); playIdx++; playNext(); }, (cd.trimEnd-cd.trimStart)*1000);
+}
+
+function resetPreview() { playing=false; document.getElementById('play-btn').textContent='▶ Play'; clearTimeout(playTimer); playIdx=0; const v=document.getElementById('pvid'); v.pause(); updPreview(); }
+
+// ═══════════════════════════════════════
+// TABS & UTILS
+// ═══════════════════════════════════════
+function setTab(t) {
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.t===t));
+  document.getElementById('tab-editor').style.display=t==='editor'?'flex':'none';
+  document.getElementById('tab-queue').style.display=t==='queue'?'block':'none';
+  if(t==='queue') renderQueue();
+}
+
+function fmtT(s) { if(!s||isNaN(s)) return '0:00'; return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'); }
+
+function updateStats() {
+  document.getElementById('s-clips').textContent=clips.length;
+  const r=queue.filter(q=>q.status==='ready').length;
+  document.getElementById('s-ready').textContent=r;
+  document.getElementById('s-left').textContent=30-r;
+}
+
+// Upload handlers
+const uz=document.getElementById('uzone'), fi=document.getElementById('finput');
+uz.addEventListener('click',()=>fi.click());
+fi.addEventListener('change',e=>addFiles(e.target.files));
+uz.addEventListener('dragover',e=>{e.preventDefault();uz.classList.add('over');});
+uz.addEventListener('dragleave',()=>uz.classList.remove('over'));
+uz.addEventListener('drop',e=>{e.preventDefault();uz.classList.remove('over');addFiles(e.dataTransfer.files);});
+
+// Init
+renderTmpls();
+</script>
+</body>
+</html>
