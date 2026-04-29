@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Superior Plumbing — Video Production Studio</title>
+<title>Fortitude Video Studio</title>
 <script src="https://apis.google.com/js/api.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -220,6 +220,66 @@
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── CAPTION OVERLAY POSITIONS (per-client style) ── */
+  .ovr.cap-top-bar    { justify-content: space-between; }
+  .ovr.cap-lower-third { justify-content: flex-end; padding-bottom: 60px; }
+  .ovr.cap-lower-third .ovr-hook { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px; text-shadow: 0 2px 8px rgba(0,0,0,0.85), 0 0 4px rgba(0,0,0,0.6); margin-bottom: 8px; }
+  .ovr.cap-center      { justify-content: center; align-items: center; }
+  .ovr.cap-center .ovr-hook { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 14px; text-shadow: 0 2px 8px rgba(0,0,0,0.85); }
+  .ovr.back-none .ovr-hook { background: transparent; backdrop-filter: none; }
+  .ovr.back-shadow .ovr-hook { background: transparent; backdrop-filter: none; text-shadow: 0 2px 8px rgba(0,0,0,0.85), 0 0 4px rgba(0,0,0,0.6); }
+  .ovr.back-bar    .ovr-hook { background: rgba(0,0,0,.65); backdrop-filter: blur(4px); }
+
+  /* ── CLIENT SWITCHER ── */
+  #client-switcher select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 10px; border-radius: 5px; font-size: 12px; font-family: inherit;
+    cursor: pointer; min-width: 180px;
+  }
+  #client-switcher select:focus { outline: none; border-color: var(--primary); }
+  #client-switcher .client-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── BRAND MODAL ── */
+  .brand-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9998; display: flex; align-items: center; justify-content: center; }
+  .brand-modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; width: 90%; max-width: 980px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+  .brand-modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .brand-modal-header h2 { font-family: 'Oswald', sans-serif; font-size: 18px; }
+  .brand-x { background: transparent; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; }
+  .brand-x:hover { color: var(--text); }
+  .brand-modal-body { display: flex; flex: 1; overflow: hidden; }
+  .brand-sidebar { width: 220px; border-right: 1px solid var(--border); padding: 14px; overflow-y: auto; flex-shrink: 0; }
+  .brand-form { flex: 1; padding: 18px 24px; overflow-y: auto; }
+  .brand-client-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; transition: background 0.15s; }
+  .brand-client-row:hover { background: var(--bg-card-hover); }
+  .brand-client-row.active { background: var(--glow); border: 1px solid var(--primary); }
+  .brand-client-row .name { flex: 1; font-size: 13px; font-weight: 600; }
+  .brand-client-row .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .brand-add-btn { width: 100%; background: var(--primary); color: white; border: none; padding: 8px; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  .brand-add-btn:hover { background: var(--primary-dark); }
+  .brand-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+  .brand-form-row { display: flex; flex-direction: column; gap: 4px; }
+  .brand-form-row.full { grid-column: 1 / -1; }
+  .brand-form-row label { font-size: 10px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
+  .brand-form-row input[type=text], .brand-form-row input[type=password], .brand-form-row select, .brand-form-row textarea {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 5px; font-size: 13px; font-family: inherit;
+  }
+  .brand-form-row input:focus, .brand-form-row select:focus, .brand-form-row textarea:focus { outline: none; border-color: var(--primary); }
+  .brand-form-row textarea { resize: vertical; min-height: 60px; }
+  .brand-form-row input[type=color] { width: 50px; height: 30px; padding: 0; border: 1px solid var(--border); background: transparent; border-radius: 4px; cursor: pointer; }
+  .brand-form-row .color-pair { display: flex; align-items: center; gap: 8px; }
+  .brand-form-row .color-pair input[type=text] { flex: 1; }
+  .brand-form-section { font-family: 'Oswald', sans-serif; font-size: 13px; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .brand-form-section:first-of-type { margin-top: 0; padding-top: 0; border: none; }
+  .brand-toggle-row { display: flex; align-items: center; gap: 10px; }
+  .brand-actions { display: flex; gap: 8px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .brand-actions button { padding: 8px 16px; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .brand-save  { background: var(--primary); color: white; }
+  .brand-save:hover { background: var(--primary-dark); }
+  .brand-delete { background: var(--bg-elev); color: var(--red); border: 1px solid var(--red) !important; margin-left: auto; }
+  .brand-delete:hover { background: rgba(231,76,60,0.15); }
+  .brand-logo-preview { max-width: 80px; max-height: 80px; border-radius: 4px; background: var(--bg); padding: 4px; display: block; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -230,7 +290,7 @@
 <div class="wizard-overlay" id="wizard">
 <div class="wizard">
   <div class="wizard-logo">
-    <h1>Superior Plumbing <span>Video Studio</span></h1>
+    <h1>Fortitude <span>Video Studio</span></h1>
     <p>Let's connect your tools and get you producing videos</p>
   </div>
 
@@ -353,7 +413,10 @@
 <!-- MAIN APP -->
 <!-- ═══════════════════════════════════ -->
 <div class="header" id="app-header" style="display:none">
-  <h1>Superior Plumbing <span>Video Studio</span></h1>
+  <div style="display:flex;align-items:center;gap:18px;">
+    <h1 id="app-title">Video Studio</h1>
+    <div id="client-switcher" style="display:flex;align-items:center;gap:8px;"></div>
+  </div>
   <div class="header-right">
     <div class="stat-group">
       <div class="stat"><div class="stat-n" id="s-clips">0</div><div class="stat-l">Clips</div></div>
@@ -362,6 +425,7 @@
     </div>
     <span class="conn-badge off" id="drive-badge">● Drive: Not Connected</span>
     <span class="conn-badge off" id="ai-badge">● AI: Off</span>
+    <button class="ctrl-btn" onclick="openBrandModal()" style="font-size:10px;">🎨 Brand</button>
     <button class="ctrl-btn" onclick="showWizard()" style="font-size:10px;">⚙ Setup</button>
   </div>
 </div>
@@ -409,8 +473,8 @@
         <div class="ovr" id="ovr" style="display:none">
           <div class="ovr-hook" id="o-hook">Hook text</div>
           <div>
-            <div class="ovr-wm">SUPERIOR PLUMBING</div>
-            <div class="ovr-cta" id="o-cta">📞 Call Superior Plumbing</div>
+            <div class="ovr-wm" style="display:none;"></div>
+            <div class="ovr-cta" id="o-cta"></div>
           </div>
         </div>
       </div>
@@ -423,9 +487,9 @@
       <!-- Text overlays -->
       <div class="txt-panel">
         <h4>Text Overlays</h4>
-        <div class="txt-grp"><label>Hook (first 3s)</label><input id="hook-txt" placeholder="e.g. You won't believe this..." oninput="updOvr()"></div>
-        <div class="txt-grp"><label>CTA (last 5s)</label><input id="cta-txt" placeholder="e.g. Call Superior Plumbing" oninput="updOvr()"></div>
-        <div class="txt-grp"><label>Video Title</label><input id="vid-title" placeholder="e.g. 6AM start as a plumber"></div>
+        <div class="txt-grp"><label>Hook (first 3s)</label><input id="hook-txt" placeholder="e.g. The start of a rough night" oninput="updOvr()"></div>
+        <div class="txt-grp"><label>CTA (last 5s)</label><input id="cta-txt" placeholder="(uses brand default if empty)" oninput="updOvr()"></div>
+        <div class="txt-grp"><label>Video Title</label><input id="vid-title" placeholder="e.g. 6 AM start"></div>
       </div>
 
       <!-- AI Recommendations -->
@@ -476,16 +540,52 @@
 
 <script>
 // ═══════════════════════════════════════
-// CONFIG
+// MULTI-TENANT CLIENT MODEL
 // ═══════════════════════════════════════
-const CONFIG = {
-  gapi: { key: '', clientId: '', folderId: '', connected: false },
-  ai: { provider: 'none', key: '', enabled: false },
+// Each client is a self-contained workspace: its own brand, Drive folder,
+// OpenAI key, clips library, and 30-day queue. Switching clients flips the
+// entire UI to that brand's identity.
+
+const DEFAULT_BRAND = {
+  primary: '#d60000',
+  primaryDark: '#b00000',
+  secondary: '#10b981',
+  logoDataUrl: null,
+  watermarkText: '',
+  watermarkEnabled: false,
+  defaultCTA: 'Call us today',
+  hashtags: '',
+  captionPosition: 'lower-third',  // lower-third | top-bar | center
+  captionBackdrop: 'shadow',       // shadow | bar | none
+  hookTone: 'storyteller',         // storyteller | question | promotional | zen
 };
 
-// Auto-correct a Google OAuth Client ID. Cloud Console truncates the ID in
-// the credentials list, so users sometimes copy only "...kppccltkf.apps" and
-// miss ".googleusercontent.com". We normalize on save and on load.
+function newClientObject(name) {
+  return {
+    id: 'cl-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 5),
+    name: name || 'New Client',
+    createdAt: new Date().toISOString(),
+    gapi: { key: '', clientId: '', folderId: '', connected: false },
+    ai:   { provider: 'openai', key: '', enabled: false },
+    brand: { ...DEFAULT_BRAND },
+  };
+}
+
+const CLIENTS = [];          // array of client config objects (no clips/queue here)
+let activeClientId = null;   // currently selected client ID
+
+// Active workspace state (always refers to active client's data)
+const CONFIG = {
+  gapi: { key: '', clientId: '', folderId: '', connected: false },
+  ai:   { provider: 'none', key: '', enabled: false },
+};
+const BRAND = { ...DEFAULT_BRAND };
+
+function getActiveClient() {
+  return CLIENTS.find(c => c.id === activeClientId);
+}
+
+// Auto-correct a Google OAuth Client ID truncated by Cloud Console UI.
 function normalizeClientId(id) {
   if (!id) return id;
   id = id.trim();
@@ -498,31 +598,212 @@ function normalizeClientId(id) {
   return id;
 }
 
-function saveConfig() {
+// ── Client roster persistence ─────────────────────────
+function saveClients() {
   try {
-    CONFIG.gapi.clientId = normalizeClientId(CONFIG.gapi.clientId);
-    localStorage.setItem('sp_video_config', JSON.stringify({
-      gapi: { key: CONFIG.gapi.key, clientId: CONFIG.gapi.clientId, folderId: CONFIG.gapi.folderId, connected: CONFIG.gapi.connected },
-      ai: { provider: CONFIG.ai.provider, key: CONFIG.ai.key, enabled: CONFIG.ai.enabled }
+    localStorage.setItem('sp_video_clients', JSON.stringify(CLIENTS));
+    localStorage.setItem('sp_video_active_client', activeClientId || '');
+  } catch(e) { console.warn('Failed to save clients:', e); }
+}
+
+function loadClients() {
+  try {
+    const saved = localStorage.getItem('sp_video_clients');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        CLIENTS.length = 0;
+        parsed.forEach(c => {
+          // Heal truncated client IDs on load
+          if (c.gapi) c.gapi.clientId = normalizeClientId(c.gapi.clientId);
+          // Backfill missing brand fields with defaults
+          c.brand = Object.assign({}, DEFAULT_BRAND, c.brand || {});
+          CLIENTS.push(c);
+        });
+      }
+    }
+    activeClientId = localStorage.getItem('sp_video_active_client') || null;
+    if (activeClientId && !CLIENTS.find(c => c.id === activeClientId)) {
+      activeClientId = CLIENTS[0]?.id || null;
+    }
+  } catch(e) { console.warn('Failed to load clients:', e); }
+}
+
+// ── Per-client data (clips + queue) persistence ───────
+function saveClientData(clientId) {
+  if (!clientId) return;
+  try {
+    // Strip large/transient fields before saving (blob URLs don't survive reloads)
+    const slimClips = clips.map(c => ({
+      id: c.id, name: c.name, driveId: c.driveId, streamUrl: c.streamUrl,
+      thumbnail: c.thumbnail, size: c.size, sizeMB: c.sizeMB, mimeType: c.mimeType,
+      createdTime: c.createdTime, duration: c.duration, tags: c.tags,
+      aiAnalysis: c.aiAnalysis, // keep AI analysis — it's gold
     }));
-  } catch(e) { console.warn('Failed to save config:', e); }
+    const slimQueue = queue.map(q => ({
+      day: q.day, title: q.title, pillar: q.pillar, tmpl: q.tmpl,
+      status: q.status, segs: q.segs, hook: q.hook, cta: q.cta,
+      tmplUsed: q.tmplUsed, savedAt: q.savedAt,
+    }));
+    localStorage.setItem('sp_video_data_' + clientId, JSON.stringify({
+      clips: slimClips, queue: slimQueue,
+    }));
+  } catch(e) { console.warn('Failed to save client data:', e); }
+}
+
+function loadClientData(clientId) {
+  // Reset workspace
+  clips.length = 0;
+  queue.length = 0;
+  QUEUE_DATA.forEach(q => queue.push({ ...q, status: 'empty', segs: {}, hook: '', cta: '' }));
+  if (!clientId) return;
+  try {
+    const raw = localStorage.getItem('sp_video_data_' + clientId);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (Array.isArray(data.clips)) {
+      data.clips.forEach(c => {
+        // Blob URL is gone — clip will need re-pull from Drive to play
+        c.url = null;
+        c.loaded = false;
+        c.accessToken = null;  // expired anyway
+        clips.push(c);
+      });
+    }
+    if (Array.isArray(data.queue)) {
+      data.queue.forEach((s, i) => { if (queue[i]) Object.assign(queue[i], s); });
+    }
+  } catch(e) { console.warn('Failed to load client data:', e); }
+}
+
+// ── Active-client mirror: copy active client's settings into CONFIG/BRAND ──
+function syncActiveClientToWorkspace() {
+  const c = getActiveClient();
+  if (!c) return;
+  Object.assign(CONFIG.gapi, c.gapi);
+  Object.assign(CONFIG.ai,   c.ai);
+  Object.assign(BRAND, DEFAULT_BRAND, c.brand);
+}
+
+function syncWorkspaceToActiveClient() {
+  const c = getActiveClient();
+  if (!c) return;
+  c.gapi = { ...CONFIG.gapi };
+  c.ai   = { ...CONFIG.ai   };
+  c.brand = { ...BRAND };
+}
+
+// Legacy saveConfig/loadConfig → re-route to active client
+function saveConfig() {
+  CONFIG.gapi.clientId = normalizeClientId(CONFIG.gapi.clientId);
+  syncWorkspaceToActiveClient();
+  saveClients();
 }
 
 function loadConfig() {
-  try {
-    const saved = localStorage.getItem('sp_video_config');
-    if (!saved) return false;
-    const c = JSON.parse(saved);
-    if (c.gapi) Object.assign(CONFIG.gapi, c.gapi);
-    if (c.ai) Object.assign(CONFIG.ai, c.ai);
-    // Heal previously-saved truncated Client IDs
-    const fixed = normalizeClientId(CONFIG.gapi.clientId);
-    if (fixed !== CONFIG.gapi.clientId) {
-      CONFIG.gapi.clientId = fixed;
-      saveConfig();
+  loadClients();
+  // Migrate v1 data if present (single-tenant Superior Plumbing era)
+  if (CLIENTS.length === 0) {
+    const v1 = localStorage.getItem('sp_video_config');
+    const v1Queue = localStorage.getItem('sp_video_queue');
+    const c = newClientObject('Superior Plumbing');
+    c.brand.watermarkText = 'SUPERIOR PLUMBING';
+    c.brand.defaultCTA = 'Call Superior Plumbing';
+    c.brand.hashtags = '#plumbing #serviceplumber #plumblife';
+    if (v1) {
+      try {
+        const parsed = JSON.parse(v1);
+        if (parsed.gapi) Object.assign(c.gapi, parsed.gapi);
+        if (parsed.ai)   Object.assign(c.ai,   parsed.ai);
+        c.gapi.clientId = normalizeClientId(c.gapi.clientId);
+      } catch(e) {}
     }
-    return CONFIG.gapi.connected || CONFIG.ai.enabled;
-  } catch(e) { console.warn('Failed to load config:', e); return false; }
+    CLIENTS.push(c);
+    activeClientId = c.id;
+    saveClients();
+    if (v1Queue) {
+      try {
+        // Migrate legacy queue under this client's namespace
+        localStorage.setItem('sp_video_data_' + c.id, JSON.stringify({
+          clips: [], queue: JSON.parse(v1Queue),
+        }));
+      } catch(e) {}
+    }
+  }
+  if (!activeClientId && CLIENTS.length) {
+    activeClientId = CLIENTS[0].id;
+    saveClients();
+  }
+  syncActiveClientToWorkspace();
+  loadClientData(activeClientId);
+  return CONFIG.gapi.connected || CONFIG.ai.enabled;
+}
+
+// ── Switch client: save current → load new → repaint ──
+function switchClient(newId) {
+  if (newId === activeClientId) return;
+  // Save current client's data first
+  if (activeClientId) {
+    syncWorkspaceToActiveClient();
+    saveClientData(activeClientId);
+  }
+  saveClients();
+  activeClientId = newId;
+  saveClients();
+  syncActiveClientToWorkspace();
+  loadClientData(activeClientId);
+  applyClientBrand();
+  renderClientSwitcher();
+  renderTmpls();
+  renderClips();
+  renderQueue();
+  renderTL();
+  updPreview();
+  updateStats();
+  updateConnBadges();
+}
+
+function updateConnBadges() {
+  const dBadge = document.getElementById('drive-badge');
+  const aBadge = document.getElementById('ai-badge');
+  const dBtn = document.getElementById('drive-pull-btn');
+  const aFill = document.getElementById('ai-fill-btn');
+  const aAll = document.getElementById('analyze-all-btn');
+  if (dBadge) {
+    dBadge.className = 'conn-badge ' + (CONFIG.gapi.connected ? 'on' : 'off');
+    dBadge.textContent = '● Drive: ' + (CONFIG.gapi.connected ? 'Connected' : 'Not Connected');
+  }
+  if (aBadge) {
+    aBadge.className = 'conn-badge ' + (CONFIG.ai.enabled ? 'on' : 'off');
+    aBadge.textContent = '● AI: ' + (CONFIG.ai.enabled ? CONFIG.ai.provider.toUpperCase() : 'Off');
+  }
+  if (dBtn)  dBtn.disabled  = !CONFIG.gapi.connected;
+  if (aFill) aFill.style.display = CONFIG.ai.enabled ? 'inline-block' : 'none';
+  if (aAll)  aAll.style.display  = CONFIG.ai.enabled ? 'block'        : 'none';
+}
+
+// ── Apply client's brand to live CSS variables, watermark, etc. ──
+function applyClientBrand() {
+  const root = document.documentElement;
+  root.style.setProperty('--primary', BRAND.primary);
+  root.style.setProperty('--primary-dark', BRAND.primaryDark);
+  root.style.setProperty('--green', BRAND.secondary);
+  // Watermark text
+  const wm = document.querySelector('.ovr-wm');
+  if (wm) {
+    wm.textContent = BRAND.watermarkText || '';
+    wm.style.display = (BRAND.watermarkEnabled && BRAND.watermarkText) ? 'block' : 'none';
+  }
+  // Caption position class on overlay
+  const ovr = document.getElementById('ovr');
+  if (ovr) {
+    ovr.classList.remove('cap-lower-third','cap-top-bar','cap-center');
+    ovr.classList.add('cap-' + BRAND.captionPosition);
+    ovr.classList.remove('back-shadow','back-bar','back-none');
+    ovr.classList.add('back-' + BRAND.captionBackdrop);
+  }
+  // Update header brand name + switcher selection
+  renderClientSwitcher();
 }
 
 // ═══════════════════════════════════════
@@ -665,21 +946,11 @@ function launchApp() {
   document.getElementById('wizard').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('app-header').style.display = 'flex';
-
-  // Update badges
-  if (CONFIG.gapi.connected) {
-    document.getElementById('drive-badge').className = 'conn-badge on';
-    document.getElementById('drive-badge').textContent = '● Drive: Connected';
-    document.getElementById('drive-pull-btn').disabled = false;
-  }
-  if (CONFIG.ai.enabled) {
-    document.getElementById('ai-badge').className = 'conn-badge on';
-    document.getElementById('ai-badge').textContent = '● AI: ' + CONFIG.ai.provider.toUpperCase();
-    document.getElementById('ai-fill-btn').style.display = 'inline-block';
-    document.getElementById('analyze-all-btn').style.display = 'block';
-  }
-
+  applyClientBrand();
+  updateConnBadges();
+  renderClientSwitcher();
   renderTmpls();
+  renderClips();
   renderQueue();
   updateStats();
 }
@@ -928,9 +1199,19 @@ async function analyzeClipAI(clip) {
   canvas.getContext('2d').drawImage(video, 0, 0, 320, 568);
   const frameData = canvas.toDataURL('image/jpeg', 0.6);
 
-  const prompt = `You are an expert social media video editor analyzing raw footage for "Superior Plumbing" — a local plumbing company creating 30 short-form marketing videos per month for TikTok, Instagram Reels, Facebook, and YouTube Shorts.
+  // Hook tone instructions vary per active client's brand voice
+  const hookToneSpec = {
+    storyteller: 'Storyteller — describe THE MOMENT in plain words. Examples: "FLOOD on the 5th floor", "The start of a rough night", "6AM start at the worst clog this week". Sentence-case, no exclamation marks, no hype.',
+    question:    'Question — open a curiosity loop. Examples: "Ever heard of Maintenance Rodding?", "Ever seen a pipe this corroded?", "Why does this happen?". End with a question mark.',
+    zen:         'Zen / Stoic — short philosophical observation about the trade. Examples: "If you\'re not uncomfortable you\'re not growing", "The job nobody else will do", "Patience over speed". No question marks, no caps lock.',
+    promotional: 'Promotional — direct call-to-action / hype. Examples: "You won\'t believe this fix!", "Watch what happens next!", "Save this before you regret it!". Loud, exclamation marks OK.',
+  };
+  const tone = (BRAND && BRAND.hookTone) ? BRAND.hookTone : 'storyteller';
+  const brandName = (getActiveClient() || {}).name || 'this brand';
 
-CONTEXT: The team films with Meta Ray-Ban glasses and smartphones during real jobs. Footage includes: arriving at jobs, working under sinks/crawlspaces, fixing pipes/drains/water heaters, before/after shots, team moments, truck shots, customer interactions, and funny moments.
+  const prompt = `You are an expert short-form video editor analyzing raw footage for "${brandName}" — a trade/service company producing TikTok, Reels, Facebook, and YouTube Shorts.
+
+CONTEXT: The team films with smart glasses and phones during real jobs. Footage includes arriving at jobs, working under sinks/crawlspaces/ceilings, fixing pipes/drains/water heaters, before/after shots, team moments, truck shots, customer interactions, and on-site problems.
 
 VIDEO METADATA:
 - Filename: "${clip.name}"
@@ -942,13 +1223,16 @@ ANALYZE this frame and classify the content. Think about:
 3. Whether this shows a problem, a process, or a result
 4. The energy/mood (satisfying fix, gross clog, educational demo, team fun)
 
+HOOK STYLE — ${tone.toUpperCase()}: ${hookToneSpec[tone]}
+The hook MUST follow this voice. Do NOT default to "Watch this!" or "You won't believe..." unless the tone is promotional.
+
 Return this exact JSON:
 {
   "pillar": "one of: Day in the Life | Tips & Education | Before & After | Social Proof | Personality",
   "template": "one of: quick-tip | before-after | day-in-life | testimonial | trending",
   "confidence": 0.0-1.0,
   "content_description": "2-3 sentence description of what this clip shows",
-  "suggested_hook": "a scroll-stopping hook line under 10 words, conversational tone",
+  "suggested_hook": "a hook line under 10 words in the ${tone} voice described above",
   "key_moment_start": best starting second for the most engaging moment,
   "key_moment_end": end second of that moment,
   "trim_suggestions": {
@@ -961,7 +1245,7 @@ Return this exact JSON:
   "viral_potential": "low | medium | high",
   "viral_reason": "why this could go viral or not, in one sentence",
   "tags": ["descriptive", "tags", "for", "this", "clip"],
-  "best_text_overlay": "suggested text to overlay on the video",
+  "best_text_overlay": "suggested caption text (NOT the hook — a different line for mid-reel)",
   "music_mood": "one of: upbeat | chill | dramatic | funny | motivational"
 }`;
 
@@ -1117,16 +1401,9 @@ async function autoFillAI() {
     document.getElementById('hook-txt').value = firstClip.aiAnalysis.suggested_hook;
   }
 
-  // Auto-suggest CTA based on template type
-  const ctaMap = {
-    'quick-tip': 'Follow for more plumbing tips!',
-    'before-after': 'Call Superior Plumbing today!',
-    'day-in-life': 'A day with Superior Plumbing 🔧',
-    'testimonial': 'Book your service now!',
-    'trending': 'Superior Plumbing gets it done 💪',
-  };
+  // Auto-suggest CTA based on active brand + template
   if (!document.getElementById('cta-txt').value) {
-    document.getElementById('cta-txt').value = ctaMap[selTmpl.id] || 'Call Superior Plumbing';
+    document.getElementById('cta-txt').value = getCTAForTemplate(selTmpl.id);
   }
 
   // Auto-suggest title
@@ -1380,14 +1657,19 @@ function buildEDL(opts) {
   const pad = (s, n) => String(s).padEnd(n);
 
   lines.push('===========================================================');
-  lines.push('  SUPERIOR PLUMBING — VIDEO EDIT DECISION LIST (EDL)');
+  lines.push(`  ${(getActiveClient()||{}).name?.toUpperCase() || 'CLIENT'} — VIDEO EDIT DECISION LIST (EDL)`);
   lines.push('===========================================================');
   if (ctx.queueDay) lines.push(`Queue Slot     : Day ${ctx.queueDay} of 30`);
   if (title)        lines.push(`Working Title  : ${title}`);
   lines.push(`Template       : ${tmpl.icon} ${tmpl.name} (${tmpl.dur})`);
   lines.push(`Target Length  : ${totalDur}s`);
   lines.push(`Aspect Ratio   : 9:16 vertical (TikTok / Reels / Shorts)`);
-  lines.push(`Watermark      : SUPERIOR PLUMBING (bottom-right)`);
+  const wmLine = (BRAND.watermarkEnabled && BRAND.watermarkText)
+    ? `${BRAND.watermarkText} (bottom-right)`
+    : 'NONE — branded by voice + hashtags';
+  lines.push(`Watermark      : ${wmLine}`);
+  lines.push(`Caption Style  : ${BRAND.captionPosition} / ${BRAND.captionBackdrop} / white sans-serif`);
+  lines.push(`Hook Tone      : ${BRAND.hookTone}`);
   lines.push(`Generated      : ${new Date().toLocaleString()}`);
   lines.push('');
   lines.push('----- TEXT OVERLAYS -----');
@@ -1433,9 +1715,29 @@ function buildEDL(opts) {
   lines.push('');
   lines.push('----- EDITOR NOTES -----');
   lines.push('* Cut to the times above; nudge ±0.2s as needed for clean speech.');
-  lines.push('* Apply Hook overlay over the first 3 seconds; CTA overlay over the last 5.');
-  lines.push('* Keep the SUPERIOR PLUMBING watermark on every shot.');
+  const capPosNote = {
+    'lower-third': 'Lower-third position (bottom 25%), 8-12% above frame edge.',
+    'top-bar':     'Top-bar position (top 15%), centered.',
+    'center':      'Centered vertically, large display weight.',
+  }[BRAND.captionPosition] || 'Lower-third position.';
+  const capBackNote = {
+    'shadow': 'White text + drop shadow (cinematic, no backdrop bar).',
+    'bar':    'White text on solid black bar, 65% opacity.',
+    'none':   'White text only, no shadow or backdrop.',
+  }[BRAND.captionBackdrop] || 'Drop shadow.';
+  lines.push(`* Captions: ${capPosNote} ${capBackNote}`);
+  lines.push(`* Hook copy goes over the first 3 seconds. CTA over the last 5.`);
+  if (BRAND.watermarkEnabled && BRAND.watermarkText) {
+    lines.push(`* Keep the "${BRAND.watermarkText}" watermark on every shot, bottom-right.`);
+  } else {
+    lines.push('* No corner watermark — brand identity comes through voice + hashtags.');
+  }
   lines.push('* Export 1080x1920, MP4 H.264, audio at -14 LUFS.');
+  if (BRAND.hashtags && BRAND.hashtags.trim()) {
+    lines.push('');
+    lines.push('----- HASHTAG STACK (for caption / description) -----');
+    lines.push(BRAND.hashtags.trim());
+  }
   lines.push('===========================================================');
 
   const json = {
@@ -1455,7 +1757,18 @@ function buildEDL(opts) {
         trimEnd: cd ? cd.trimEnd : null,
       };
     }),
-    overlays: { hook, cta, watermark: 'SUPERIOR PLUMBING' },
+    overlays: {
+      hook, cta,
+      watermark: (BRAND.watermarkEnabled && BRAND.watermarkText) ? BRAND.watermarkText : null,
+      captionPosition: BRAND.captionPosition,
+      captionBackdrop: BRAND.captionBackdrop,
+    },
+    brand: {
+      client: (getActiveClient()||{}).name,
+      primary: BRAND.primary,
+      hookTone: BRAND.hookTone,
+      hashtags: BRAND.hashtags,
+    },
     spec: { aspectRatio: '9:16', resolution: '1080x1920', codec: 'H.264' },
     generatedAt: new Date().toISOString(),
   };
@@ -1516,7 +1829,7 @@ function exportAllQueueEDLs() {
     return;
   }
   const stamp = new Date().toISOString().substring(0, 10);
-  const indexLines = [`SUPERIOR PLUMBING — ${ready.length} EDLs Generated ${stamp}`, ''];
+  const indexLines = [`${(getActiveClient()||{}).name?.toUpperCase() || 'CLIENT'} — ${ready.length} EDLs Generated ${stamp}`, ''];
   ready.forEach(q => {
     const tmpl = TEMPLATES.find(t => t.id === (q.tmplUsed || q.tmpl));
     if (!tmpl) return;
@@ -1532,25 +1845,12 @@ function exportAllQueueEDLs() {
 }
 
 // ─── QUEUE PERSISTENCE ──────────────────────────────────
+// Now per-client; routes to active client's namespace.
 function saveQueueState() {
-  try {
-    const slim = queue.map(q => ({
-      day: q.day, title: q.title, pillar: q.pillar, tmpl: q.tmpl,
-      status: q.status, segs: q.segs, hook: q.hook, cta: q.cta,
-      tmplUsed: q.tmplUsed, savedAt: q.savedAt,
-    }));
-    localStorage.setItem('sp_video_queue', JSON.stringify(slim));
-  } catch(e) { console.warn('Failed to save queue:', e); }
+  if (activeClientId) saveClientData(activeClientId);
 }
-
 function loadQueueState() {
-  try {
-    const raw = localStorage.getItem('sp_video_queue');
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (!Array.isArray(saved)) return;
-    saved.forEach((s, i) => { if (queue[i]) Object.assign(queue[i], s); });
-  } catch(e) { console.warn('Failed to load queue:', e); }
+  // No-op — loading happens via loadClientData inside loadConfig
 }
 
 // ─── BATCH QUEUE GENERATION ─────────────────────────────
@@ -1602,13 +1902,18 @@ function trimForSegment(clip, seg) {
   return { trimStart, trimEnd };
 }
 
-const CTA_MAP = {
-  'quick-tip': 'Follow for more plumbing tips!',
-  'before-after': 'Call Superior Plumbing today!',
-  'day-in-life': 'A day with Superior Plumbing 🔧',
-  'testimonial': 'Book your service now!',
-  'trending': 'Superior Plumbing gets it done 💪',
-};
+// CTA defaults are brand-aware: fall back to client's brand.defaultCTA
+function getCTAForTemplate(tmplId) {
+  if (BRAND && BRAND.defaultCTA) return BRAND.defaultCTA;
+  const M = {
+    'quick-tip': 'Follow for more tips!',
+    'before-after': 'Book your service today',
+    'day-in-life': 'See more like this',
+    'testimonial': 'Book your service now',
+    'trending': 'We get it done',
+  };
+  return M[tmplId] || 'Get in touch';
+}
 
 function fillSlotAuto(slotIdx, sharedUsed) {
   const q = queue[slotIdx];
@@ -1640,7 +1945,7 @@ function fillSlotAuto(slotIdx, sharedUsed) {
   q.tmplUsed = tmpl.id;
   q.segs = segs;
   q.hook = hookLine;
-  q.cta = CTA_MAP[tmpl.id] || 'Call Superior Plumbing';
+  q.cta = getCTAForTemplate(tmpl.id);
   q.status = Object.keys(segs).length >= tmpl.segments.length ? 'ready' : 'partial';
   q.savedAt = new Date().toISOString();
   return true;
@@ -1738,7 +2043,7 @@ function updPreview() {
 
 function updOvr() {
   document.getElementById('o-hook').textContent = document.getElementById('hook-txt').value || 'Hook text here';
-  document.getElementById('o-cta').textContent = document.getElementById('cta-txt').value || '📞 Call Superior Plumbing';
+  document.getElementById('o-cta').textContent = document.getElementById('cta-txt').value || (BRAND.defaultCTA || '');
 }
 
 function playPreview() {
@@ -1797,6 +2102,288 @@ if (loadConfig()) {
   renderTmpls();
 }
 
+// ═══════════════════════════════════════
+// CLIENT SWITCHER + BRAND MODAL
+// ═══════════════════════════════════════
+function renderClientSwitcher() {
+  const sw = document.getElementById('client-switcher');
+  if (!sw) return;
+  if (!CLIENTS.length) { sw.innerHTML = ''; return; }
+  const active = getActiveClient();
+  const dot = active ? `<div class="client-dot" style="background:${active.brand.primary}"></div>` : '';
+  const opts = CLIENTS.map(c => `<option value="${c.id}" ${c.id===activeClientId?'selected':''}>${c.name}</option>`).join('');
+  sw.innerHTML = `${dot}<select onchange="switchClient(this.value)">${opts}</select>`;
+  const title = document.getElementById('app-title');
+  if (title && active) title.textContent = active.name;
+}
+
+let editingClientId = null;
+
+function openBrandModal() {
+  document.getElementById('brand-modal').style.display = 'flex';
+  editingClientId = activeClientId;
+  renderBrandClientList();
+  renderBrandForm();
+}
+
+function closeBrandModal() {
+  document.getElementById('brand-modal').style.display = 'none';
+}
+
+function createNewClient() {
+  const name = prompt('Client name:');
+  if (!name) return;
+  const c = newClientObject(name.trim());
+  CLIENTS.push(c);
+  saveClients();
+  editingClientId = c.id;
+  renderBrandClientList();
+  renderBrandForm();
+}
+
+function renderBrandClientList() {
+  const list = document.getElementById('brand-client-list');
+  if (!list) return;
+  list.innerHTML = CLIENTS.map(c => `
+    <div class="brand-client-row ${c.id===editingClientId?'active':''}" onclick="editBrandClient('${c.id}')">
+      <div class="swatch" style="background:${c.brand.primary}"></div>
+      <div class="name">${escapeHtml(c.name)}</div>
+      ${c.id===activeClientId ? '<span style="font-size:9px;color:var(--green);">ACTIVE</span>' : ''}
+    </div>
+  `).join('');
+}
+
+function editBrandClient(id) {
+  editingClientId = id;
+  renderBrandClientList();
+  renderBrandForm();
+}
+
+function escapeHtml(s) { return String(s||'').replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;" }[m])); }
+
+function renderBrandForm() {
+  const form = document.getElementById('brand-form');
+  if (!form) return;
+  const c = CLIENTS.find(x => x.id === editingClientId);
+  if (!c) {
+    form.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Pick a client on the left or create a new one.</p>';
+    return;
+  }
+  const b = c.brand;
+  form.innerHTML = `
+    <div class="brand-form-section">Identity</div>
+    <div class="brand-form-grid">
+      <div class="brand-form-row full">
+        <label>Client Name</label>
+        <input type="text" id="bf-name" value="${escapeHtml(c.name)}">
+      </div>
+    </div>
+
+    <div class="brand-form-section">Brand</div>
+    <div class="brand-form-grid">
+      <div class="brand-form-row">
+        <label>Primary Color</label>
+        <div class="color-pair">
+          <input type="color" id="bf-primary-c" value="${b.primary}" oninput="document.getElementById('bf-primary').value=this.value">
+          <input type="text" id="bf-primary" value="${b.primary}" oninput="document.getElementById('bf-primary-c').value=this.value">
+        </div>
+      </div>
+      <div class="brand-form-row">
+        <label>Primary Dark</label>
+        <div class="color-pair">
+          <input type="color" id="bf-primary-dark-c" value="${b.primaryDark}" oninput="document.getElementById('bf-primary-dark').value=this.value">
+          <input type="text" id="bf-primary-dark" value="${b.primaryDark}" oninput="document.getElementById('bf-primary-dark-c').value=this.value">
+        </div>
+      </div>
+      <div class="brand-form-row">
+        <label>Secondary (Accent)</label>
+        <div class="color-pair">
+          <input type="color" id="bf-secondary-c" value="${b.secondary}" oninput="document.getElementById('bf-secondary').value=this.value">
+          <input type="text" id="bf-secondary" value="${b.secondary}" oninput="document.getElementById('bf-secondary-c').value=this.value">
+        </div>
+      </div>
+      <div class="brand-form-row full">
+        <label>Logo (image upload, base64-stored, optional)</label>
+        <input type="file" accept="image/*" onchange="brandUploadLogo(event)">
+        ${b.logoDataUrl ? `<img class="brand-logo-preview" src="${b.logoDataUrl}">` : ''}
+      </div>
+    </div>
+
+    <div class="brand-form-section">Voice & Style</div>
+    <div class="brand-form-grid">
+      <div class="brand-form-row">
+        <label>Hook Tone</label>
+        <select id="bf-hook-tone">
+          <option value="storyteller" ${b.hookTone==='storyteller'?'selected':''}>Storyteller (descriptive moment)</option>
+          <option value="question"    ${b.hookTone==='question'?'selected':''}>Question (curiosity)</option>
+          <option value="zen"         ${b.hookTone==='zen'?'selected':''}>Zen / Stoic (philosophy)</option>
+          <option value="promotional" ${b.hookTone==='promotional'?'selected':''}>Promotional (Watch this!)</option>
+        </select>
+      </div>
+      <div class="brand-form-row">
+        <label>Caption Position</label>
+        <select id="bf-caption-position">
+          <option value="lower-third" ${b.captionPosition==='lower-third'?'selected':''}>Lower Third</option>
+          <option value="top-bar"     ${b.captionPosition==='top-bar'?'selected':''}>Top Bar</option>
+          <option value="center"      ${b.captionPosition==='center'?'selected':''}>Center</option>
+        </select>
+      </div>
+      <div class="brand-form-row">
+        <label>Caption Backdrop</label>
+        <select id="bf-caption-backdrop">
+          <option value="shadow" ${b.captionBackdrop==='shadow'?'selected':''}>Drop Shadow Only (cinematic)</option>
+          <option value="bar"    ${b.captionBackdrop==='bar'?'selected':''}>Solid Bar (high contrast)</option>
+          <option value="none"   ${b.captionBackdrop==='none'?'selected':''}>None</option>
+        </select>
+      </div>
+      <div class="brand-form-row">
+        <label>Default CTA</label>
+        <input type="text" id="bf-cta" value="${escapeHtml(b.defaultCTA)}">
+      </div>
+      <div class="brand-form-row full">
+        <label>Hashtag Stack (auto-appended to EDLs / social copy)</label>
+        <textarea id="bf-hashtags">${escapeHtml(b.hashtags)}</textarea>
+      </div>
+    </div>
+
+    <div class="brand-form-section">Watermark</div>
+    <div class="brand-form-grid">
+      <div class="brand-form-row">
+        <label>Show Watermark</label>
+        <div class="brand-toggle-row">
+          <input type="checkbox" id="bf-wm-enabled" ${b.watermarkEnabled?'checked':''} style="width:auto;">
+          <span style="font-size:12px;color:var(--text-muted);">Bottom-right corner</span>
+        </div>
+      </div>
+      <div class="brand-form-row">
+        <label>Watermark Text</label>
+        <input type="text" id="bf-wm-text" value="${escapeHtml(b.watermarkText)}" placeholder="e.g. SUPERIOR PLUMBING">
+      </div>
+    </div>
+
+    <div class="brand-form-section">Connections</div>
+    <div class="brand-form-grid">
+      <div class="brand-form-row full">
+        <label>Google API Key</label>
+        <input type="text" id="bf-gapi-key" value="${escapeHtml(c.gapi.key)}" placeholder="AIzaSy...">
+      </div>
+      <div class="brand-form-row full">
+        <label>Google OAuth Client ID</label>
+        <input type="text" id="bf-gapi-clientid" value="${escapeHtml(c.gapi.clientId)}">
+      </div>
+      <div class="brand-form-row full">
+        <label>Shared Drive Folder ID</label>
+        <input type="text" id="bf-gapi-folder" value="${escapeHtml(c.gapi.folderId)}">
+      </div>
+      <div class="brand-form-row">
+        <label>AI Provider</label>
+        <select id="bf-ai-provider">
+          <option value="openai"    ${c.ai.provider==='openai'?'selected':''}>OpenAI (GPT-4o)</option>
+          <option value="anthropic" ${c.ai.provider==='anthropic'?'selected':''}>Anthropic (Claude)</option>
+          <option value="gemini"    ${c.ai.provider==='gemini'?'selected':''}>Google Gemini</option>
+          <option value="none"      ${c.ai.provider==='none'?'selected':''}>None</option>
+        </select>
+      </div>
+      <div class="brand-form-row">
+        <label>AI API Key (per-client)</label>
+        <input type="password" id="bf-ai-key" value="${escapeHtml(c.ai.key)}" placeholder="sk-...">
+      </div>
+    </div>
+
+    <div class="brand-actions">
+      <button class="brand-save" onclick="saveBrandForm()">💾 Save Changes</button>
+      <button class="brand-save" style="background:var(--bg-elev);border:1px solid var(--primary);color:var(--primary);" onclick="makeActive('${c.id}')">⚡ Make Active</button>
+      ${CLIENTS.length > 1 ? `<button class="brand-delete" onclick="deleteClient('${c.id}')">🗑 Delete Client</button>` : ''}
+    </div>
+  `;
+}
+
+function brandUploadLogo(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const c = CLIENTS.find(x => x.id === editingClientId);
+    if (c) {
+      c.brand.logoDataUrl = e.target.result;
+      saveClients();
+      renderBrandForm();
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveBrandForm() {
+  const c = CLIENTS.find(x => x.id === editingClientId);
+  if (!c) return;
+  const get = id => document.getElementById(id)?.value;
+  const getChk = id => document.getElementById(id)?.checked;
+  c.name = get('bf-name') || c.name;
+  c.brand.primary       = get('bf-primary')      || c.brand.primary;
+  c.brand.primaryDark   = get('bf-primary-dark') || c.brand.primaryDark;
+  c.brand.secondary     = get('bf-secondary')    || c.brand.secondary;
+  c.brand.hookTone      = get('bf-hook-tone');
+  c.brand.captionPosition = get('bf-caption-position');
+  c.brand.captionBackdrop = get('bf-caption-backdrop');
+  c.brand.defaultCTA    = get('bf-cta') || '';
+  c.brand.hashtags      = get('bf-hashtags') || '';
+  c.brand.watermarkEnabled = getChk('bf-wm-enabled') || false;
+  c.brand.watermarkText = get('bf-wm-text') || '';
+  c.gapi.key      = get('bf-gapi-key')      || '';
+  c.gapi.clientId = normalizeClientId(get('bf-gapi-clientid') || '');
+  c.gapi.folderId = get('bf-gapi-folder')   || '';
+  c.gapi.connected = !!(c.gapi.key && c.gapi.clientId);
+  c.ai.provider   = get('bf-ai-provider') || 'openai';
+  c.ai.key        = get('bf-ai-key') || '';
+  c.ai.enabled    = c.ai.provider !== 'none' && !!c.ai.key;
+  saveClients();
+  renderBrandClientList();
+  renderBrandForm();
+  // If we just edited the active client, repaint the workspace
+  if (c.id === activeClientId) {
+    syncActiveClientToWorkspace();
+    applyClientBrand();
+    updateConnBadges();
+    renderClientSwitcher();
+  }
+  flashSaved();
+}
+
+function flashSaved() {
+  const t = document.createElement('div');
+  t.textContent = '✓ Saved';
+  t.style.cssText = 'position:fixed;top:20px;right:20px;background:var(--green);color:white;padding:8px 16px;border-radius:5px;font-size:13px;z-index:99999;';
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 1500);
+}
+
+function makeActive(id) {
+  switchClient(id);
+  closeBrandModal();
+}
+
+function deleteClient(id) {
+  if (CLIENTS.length <= 1) { alert('Keep at least one client.'); return; }
+  if (!confirm('Delete this client and ALL its clips/queue data? This cannot be undone.')) return;
+  const idx = CLIENTS.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  // Remove client + its data namespace
+  localStorage.removeItem('sp_video_data_' + id);
+  CLIENTS.splice(idx, 1);
+  if (activeClientId === id) {
+    activeClientId = CLIENTS[0].id;
+    syncActiveClientToWorkspace();
+    loadClientData(activeClientId);
+    applyClientBrand();
+    updateConnBadges();
+    renderTmpls(); renderClips(); renderQueue(); renderTL(); updPreview();
+  }
+  saveClients();
+  editingClientId = activeClientId;
+  renderBrandClientList();
+  renderBrandForm();
+}
+
 // Pre-fill wizard fields from saved config when reopening setup
 function prefillWizard() {
   if (CONFIG.gapi.key) document.getElementById('gapi-key').value = CONFIG.gapi.key;
@@ -1809,5 +2396,28 @@ function prefillWizard() {
   if (CONFIG.ai.key) document.getElementById('ai-key').value = CONFIG.ai.key;
 }
 </script>
+
+<!-- ═══════════════════════════════════ -->
+<!-- BRAND SETTINGS MODAL (multi-tenant) -->
+<!-- ═══════════════════════════════════ -->
+<div id="brand-modal" class="brand-modal-overlay" style="display:none;">
+  <div class="brand-modal">
+    <div class="brand-modal-header">
+      <h2>🎨 Client Library</h2>
+      <button class="brand-x" onclick="closeBrandModal()">✕</button>
+    </div>
+    <div class="brand-modal-body">
+      <div class="brand-sidebar">
+        <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:1px;margin-bottom:10px;">Clients</div>
+        <div id="brand-client-list"></div>
+        <button class="brand-add-btn" onclick="createNewClient()">+ New Client</button>
+      </div>
+      <div class="brand-form" id="brand-form">
+        <p style="color:var(--text-muted);font-size:13px;">Pick a client on the left or create a new one.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
