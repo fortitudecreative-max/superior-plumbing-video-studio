@@ -483,8 +483,24 @@ const CONFIG = {
   ai: { provider: 'none', key: '', enabled: false },
 };
 
+// Auto-correct a Google OAuth Client ID. Cloud Console truncates the ID in
+// the credentials list, so users sometimes copy only "...kppccltkf.apps" and
+// miss ".googleusercontent.com". We normalize on save and on load.
+function normalizeClientId(id) {
+  if (!id) return id;
+  id = id.trim();
+  if (id.endsWith('.apps.googleusercontent.com')) return id;
+  if (id.endsWith('.apps')) return id + '.googleusercontent.com';
+  if (/\.googleusercontent\.com$/.test(id) && !id.includes('.apps.')) {
+    return id.replace(/\.googleusercontent\.com$/, '.apps.googleusercontent.com');
+  }
+  if (!/\.apps/.test(id)) return id + '.apps.googleusercontent.com';
+  return id;
+}
+
 function saveConfig() {
   try {
+    CONFIG.gapi.clientId = normalizeClientId(CONFIG.gapi.clientId);
     localStorage.setItem('sp_video_config', JSON.stringify({
       gapi: { key: CONFIG.gapi.key, clientId: CONFIG.gapi.clientId, folderId: CONFIG.gapi.folderId, connected: CONFIG.gapi.connected },
       ai: { provider: CONFIG.ai.provider, key: CONFIG.ai.key, enabled: CONFIG.ai.enabled }
@@ -499,6 +515,12 @@ function loadConfig() {
     const c = JSON.parse(saved);
     if (c.gapi) Object.assign(CONFIG.gapi, c.gapi);
     if (c.ai) Object.assign(CONFIG.ai, c.ai);
+    // Heal previously-saved truncated Client IDs
+    const fixed = normalizeClientId(CONFIG.gapi.clientId);
+    if (fixed !== CONFIG.gapi.clientId) {
+      CONFIG.gapi.clientId = fixed;
+      saveConfig();
+    }
     return CONFIG.gapi.connected || CONFIG.ai.enabled;
   } catch(e) { console.warn('Failed to load config:', e); return false; }
 }
@@ -684,6 +706,7 @@ async function pullFromDrive() {
           const tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: CONFIG.gapi.clientId,
             scope: 'https://www.googleapis.com/auth/drive.readonly',
+            prompt: 'select_account',
             callback: async (tokenResponse) => {
               if (tokenResponse.error) {
                 console.error('OAuth error:', tokenResponse);
@@ -798,7 +821,7 @@ async function pullFromDrive() {
               resolve();
             }
           });
-          tokenClient.requestAccessToken();
+          tokenClient.requestAccessToken({ prompt: 'select_account' });
         } catch (e) {
           console.error('GAPI init error:', e);
           reject(e);
