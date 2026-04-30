@@ -445,6 +445,10 @@
       <button class="drive-btn" id="analyze-all-btn" onclick="analyzeAllClips()" style="display:none;background:linear-gradient(135deg,var(--primary),var(--primary-dark));border-color:var(--primary);font-weight:600;">
         🤖 Analyze All Clips
       </button>
+      <button class="drive-btn" id="cluster-btn" onclick="clusterClips()" style="display:none;background:var(--bg-elev);border-color:var(--primary);color:var(--primary);font-weight:600;">
+        🧩 Find Stories
+      </button>
+      <div id="stories-panel" style="display:none;margin-bottom:10px;"></div>
       <div class="upload-zone" id="uzone">
         <div class="upload-icon">🎬</div>
         <div class="upload-text">Drag & drop clips or click to browse</div>
@@ -644,9 +648,10 @@ function saveClientData(clientId) {
       day: q.day, title: q.title, pillar: q.pillar, tmpl: q.tmpl,
       status: q.status, segs: q.segs, hook: q.hook, cta: q.cta,
       tmplUsed: q.tmplUsed, savedAt: q.savedAt,
+      storyId: q.storyId, storyTitle: q.storyTitle, storyArc: q.storyArc,
     }));
     localStorage.setItem('sp_video_data_' + clientId, JSON.stringify({
-      clips: slimClips, queue: slimQueue,
+      clips: slimClips, queue: slimQueue, stories: STORIES,
     }));
   } catch(e) { console.warn('Failed to save client data:', e); }
 }
@@ -673,6 +678,9 @@ function loadClientData(clientId) {
     if (Array.isArray(data.queue)) {
       data.queue.forEach((s, i) => { if (queue[i]) Object.assign(queue[i], s); });
     }
+    STORIES.length = 0;
+    if (Array.isArray(data.stories)) data.stories.forEach(s => STORIES.push(s));
+    renderStoriesPanel?.();
   } catch(e) { console.warn('Failed to load client data:', e); }
 }
 
@@ -780,6 +788,8 @@ function updateConnBadges() {
   if (dBtn)  dBtn.disabled  = !CONFIG.gapi.connected;
   if (aFill) aFill.style.display = CONFIG.ai.enabled ? 'inline-block' : 'none';
   if (aAll)  aAll.style.display  = CONFIG.ai.enabled ? 'block'        : 'none';
+  const cBtn = document.getElementById('cluster-btn');
+  if (cBtn) cBtn.style.display = CONFIG.ai.enabled ? 'block' : 'none';
 }
 
 // ── Apply client's brand to live CSS variables, watermark, etc. ──
@@ -952,6 +962,7 @@ function launchApp() {
   renderTmpls();
   renderClips();
   renderQueue();
+  renderStoriesPanel();
   updateStats();
 }
 
@@ -1488,11 +1499,16 @@ function renderClips() {
       ? `<video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video>`
       : (thumbSrc ? `<img src="${thumbSrc}" style="width:100%;height:80px;object-fit:cover;border-radius:4px;" referrerpolicy="no-referrer">` : `<div style="width:100%;height:80px;background:var(--bg-elev);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:20px;">🎬</div>`);
     const durLabel = cl.duration > 0 ? fmtT(cl.duration) : (cl.sizeMB ? cl.sizeMB+'MB' : '');
-    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}" onclick="preloadClip('${cl.id}')">
+    const storyDot = cl.storyColor
+      ? `<div title="${escapeHtml(cl.storyTitle||'')}" style="position:absolute;bottom:18px;left:3px;background:${cl.storyColor};color:white;font-size:7px;font-weight:700;padding:1px 4px;border-radius:2px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml((cl.storyTitle||'').substring(0,16))}</div>`
+      : '';
+    const cardBorder = cl.storyColor ? `style="border-color:${cl.storyColor};border-width:2px;"` : '';
+    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}" onclick="preloadClip('${cl.id}')" ${cardBorder}>
       ${videoEl}
       <span class="c-dur">${durLabel}</span>
       <span class="c-tag" style="background:${PC[mainTag]||'#888'}">${mainTag}</span>
       <button class="c-rm" onclick="event.stopPropagation();rmClip('${cl.id}')">✕</button>
+      ${storyDot}
       ${ai ? `<div class="c-ai"><div class="c-ai-tags">${(ai.tags||[]).slice(0,3).map(t=>`<span class="c-ai-tag">${t}</span>`).join('')}${ai.viral_potential?`<span class="c-ai-tag" style="background:${ai.viral_potential==='high'?'rgba(16, 185, 129, 0.45)':'rgba(255,255,255,.1)'}">${ai.viral_potential} viral</span>`:''}</div></div>` : ''}
       <div class="c-name">${cl.name}</div>
     </div>`;
@@ -1537,10 +1553,13 @@ function renderQueue() {
     const totalSegs = tmpl ? tmpl.segments.length : 0;
     const segMeta = totalSegs ? ` · ${segCount}/${totalSegs} clips` : '';
     const canExport = segCount > 0;
+    const storyChip = q.storyTitle
+      ? `<span style="background:rgba(214,0,0,0.18);color:var(--primary);font-size:9px;padding:2px 6px;border-radius:3px;margin-left:6px;font-weight:600;">📖 ${escapeHtml(q.storyTitle.substring(0,30))}</span>`
+      : '';
     return `<div class="q-item">
       <div class="q-num">${q.day}</div>
       <div class="q-info" onclick="loadQueue(${i})" style="cursor:pointer;">
-        <div class="q-title">${q.title}</div>
+        <div class="q-title">${q.title}${storyChip}</div>
         <div class="q-sub">${dn} May ${q.day} · ${q.pillar}${segMeta}</div>
       </div>
       <span class="q-badge ${sc}">${st}</span>
@@ -1588,6 +1607,156 @@ function setTrim(i,type,val) {
 }
 
 function clearTL() { segClips={}; renderTL(); updPreview(); }
+
+// ─── STORY CLUSTERING ──────────────────────────────────
+// Sends all analyzed clips' metadata to GPT-4o in ONE batched call and gets
+// back a grouping into "stories" — sets of clips that came from the same job
+// or share a tight thematic frame. Generate All then prefers same-cluster picks.
+async function clusterClips() {
+  if (!CONFIG.ai.enabled) { alert('Turn on AI in Setup first.'); return; }
+  const analyzed = clips.filter(c => c.aiAnalysis);
+  if (analyzed.length < 4) {
+    alert('Analyze at least 4 clips first (need enough material to find stories).');
+    return;
+  }
+  const btn = document.getElementById('cluster-btn');
+  btn.disabled = true;
+  btn.textContent = '🧩 Finding stories…';
+
+  // Build a compact summary of every analyzed clip for the LLM
+  const items = analyzed.map((c, i) => ({
+    idx: i,
+    name: c.name.substring(0, 40),
+    pillar: c.aiAnalysis.pillar,
+    mood: c.aiAnalysis.mood,
+    description: (c.aiAnalysis.content_description || '').substring(0, 200),
+    tags: (c.aiAnalysis.tags || []).slice(0, 5),
+    duration: Math.round(c.duration || 0),
+    created: (c.createdTime || '').substring(0, 10),
+  }));
+
+  const prompt = `You are an expert short-form video editor for a trade-services brand. I have ${items.length} raw clips already analyzed by AI. Group these clips into "stories" — sets of clips that likely came from the same job/event/thematic moment and would assemble into a coherent 30-60 second video.
+
+A story should typically have 3-8 related clips that share:
+- Same physical location or job
+- Same problem-solving arc (problem → process → result)
+- Same subject/equipment/situation
+- Or close timestamps + matching mood
+
+Some clips may be lone wolves (their own story of one). Others may belong to a cluster of 6+. Use your judgment.
+
+CLIPS:
+${JSON.stringify(items, null, 1)}
+
+Return a JSON object with this shape:
+{
+  "stories": [
+    {
+      "title": "short 4-6 word descriptive title (e.g. 'Slab leak repair Tuesday')",
+      "clipIndices": [0, 3, 7, 12],
+      "arc": "brief 1-sentence summary of how the clips tell a story together",
+      "dominantMood": "satisfying|dramatic|educational|funny|wholesome|professional|gross-but-satisfying"
+    }
+  ]
+}
+
+Every clip index 0..${items.length-1} MUST appear in exactly one story. Even singletons belong to a story (just by themselves).`;
+
+  let result;
+  try {
+    if (CONFIG.ai.provider === 'openai') {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 2000,
+          response_format: { type: 'json_object' },
+        })
+      });
+      const data = await resp.json();
+      result = JSON.parse(data.choices[0].message.content);
+    } else if (CONFIG.ai.provider === 'anthropic') {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': CONFIG.ai.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] })
+      });
+      const data = await resp.json();
+      const txt = data.content[0].text;
+      const json = txt.match(/\{[\s\S]*\}/);
+      result = json ? JSON.parse(json[0]) : null;
+    } else if (CONFIG.ai.provider === 'gemini') {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${CONFIG.ai.key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}], generationConfig: { responseMimeType: 'application/json' } })
+      });
+      const data = await resp.json();
+      result = JSON.parse(data.candidates[0].content.parts[0].text);
+    }
+  } catch (e) {
+    console.error('Clustering failed:', e);
+    btn.disabled = false;
+    btn.textContent = '🧩 Find Stories';
+    alert('Clustering failed: ' + (e.message || e));
+    return;
+  }
+
+  if (!result || !Array.isArray(result.stories)) {
+    btn.disabled = false;
+    btn.textContent = '🧩 Find Stories';
+    alert('AI returned invalid clustering output.');
+    return;
+  }
+
+  // Apply cluster IDs back onto the clips
+  const palette = ['#d60000','#10b981','#f59e0b','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f97316','#22c55e','#06b6d4','#a855f7','#ef4444'];
+  result.stories.forEach((story, sIdx) => {
+    const id = 'st-' + sIdx;
+    story.id = id;
+    story.color = palette[sIdx % palette.length];
+    (story.clipIndices || []).forEach(ci => {
+      const clip = analyzed[ci];
+      if (clip) {
+        clip.clusterId = id;
+        clip.storyTitle = story.title;
+        clip.storyArc   = story.arc;
+        clip.storyColor = story.color;
+        clip.storyMood  = story.dominantMood;
+      }
+    });
+  });
+  STORIES.length = 0;
+  result.stories.forEach(s => STORIES.push(s));
+  saveQueueState();
+
+  btn.disabled = false;
+  btn.textContent = `✓ ${STORIES.length} stories found`;
+  setTimeout(() => { btn.textContent = '🧩 Find Stories'; }, 3000);
+
+  renderStoriesPanel();
+  renderClips();
+}
+
+const STORIES = []; // hydrated by clusterClips()
+
+function renderStoriesPanel() {
+  const panel = document.getElementById('stories-panel');
+  if (!panel) return;
+  if (!STORIES.length) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:1px;margin-bottom:6px;">📖 Stories (${STORIES.length})</div>
+    ${STORIES.map(s => `
+      <div style="background:var(--bg);border-left:3px solid ${s.color};padding:6px 8px;margin-bottom:4px;border-radius:4px;font-size:11px;">
+        <div style="font-weight:600;">${escapeHtml(s.title || 'Untitled story')}</div>
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${(s.clipIndices||[]).length} clips · ${escapeHtml(s.dominantMood || '')}</div>
+      </div>
+    `).join('')}
+  `;
+}
 
 // ─── BATCH ANALYSIS ─────────────────────────────────────
 // Loads each Drive clip (if not already loaded) and runs AI analysis sequentially
@@ -1661,6 +1830,10 @@ function buildEDL(opts) {
   lines.push('===========================================================');
   if (ctx.queueDay) lines.push(`Queue Slot     : Day ${ctx.queueDay} of 30`);
   if (title)        lines.push(`Working Title  : ${title}`);
+  if (ctx.storyTitle) {
+    lines.push(`Story          : ${ctx.storyTitle}`);
+    if (ctx.storyArc) lines.push(`Story Arc      : ${ctx.storyArc}`);
+  }
   lines.push(`Template       : ${tmpl.icon} ${tmpl.name} (${tmpl.dur})`);
   lines.push(`Target Length  : ${totalDur}s`);
   lines.push(`Aspect Ratio   : 9:16 vertical (TikTok / Reels / Shorts)`);
@@ -1792,13 +1965,18 @@ function exportEDL() {
     return;
   }
   const title = document.getElementById('vid-title').value || (selTmpl.name + ' video');
+  const ctxQ = curQIdx >= 0 ? queue[curQIdx] : null;
   const edl = buildEDL({
     tmpl: selTmpl,
     segs: segClips,
     hook: document.getElementById('hook-txt').value,
     cta:  document.getElementById('cta-txt').value,
     title,
-    context: { queueDay: curQIdx >= 0 ? queue[curQIdx].day : null },
+    context: {
+      queueDay: ctxQ?.day || null,
+      storyTitle: ctxQ?.storyTitle || null,
+      storyArc:   ctxQ?.storyArc || null,
+    },
   });
   const safe = title.replace(/[^a-z0-9]+/gi, '_').toLowerCase().substring(0, 40);
   const stamp = new Date().toISOString().substring(0, 10);
@@ -1815,7 +1993,7 @@ function exportQueueSlot(i) {
   }
   const edl = buildEDL({
     tmpl, segs: q.segs, hook: q.hook, cta: q.cta, title: q.title,
-    context: { queueDay: q.day },
+    context: { queueDay: q.day, storyTitle: q.storyTitle, storyArc: q.storyArc },
   });
   const safe = (q.title || `slot_${q.day}`).replace(/[^a-z0-9]+/gi, '_').toLowerCase().substring(0, 40);
   downloadFile(`EDL_day${String(q.day).padStart(2, '0')}_${safe}.txt`, edl.text, 'text/plain');
@@ -1915,6 +2093,42 @@ function getCTAForTemplate(tmplId) {
   return M[tmplId] || 'Get in touch';
 }
 
+// Score a story for fitting a template — does this story have enough clips
+// of the right pillar to assemble a coherent video for this template?
+function scoreStoryForTemplate(story, tmpl, sharedUsed) {
+  if (!story || !story.clipIndices) return -1000;
+  const inStory = clips.filter(c => c.clusterId === story.id);
+  if (!inStory.length) return -1000;
+  // Most clips already used elsewhere?
+  const fresh = inStory.filter(c => !sharedUsed.has(c.id));
+  if (fresh.length < 2) return -500;  // story burned through
+  let score = 0;
+  // Reward when story has at least as many clips as segments
+  score += Math.min(fresh.length, tmpl.segments.length) * 10;
+  // Pillar match — count how many story clips match template's target pillar
+  const pillarTarget = templatePillarMap[tmpl.id];
+  const pillarMatches = inStory.filter(c => c.aiAnalysis?.pillar === pillarTarget).length;
+  score += pillarMatches * 15;
+  // High viral bonus
+  score += inStory.filter(c => c.aiAnalysis?.viral_potential === 'high').length * 8;
+  return score;
+}
+
+// Pick the best clip from an ordered candidate list for a specific segment ROLE.
+// Hook/Intro → most "dramatic/problem" mood; Reveal/After → "satisfying"; Tip → "educational/professional"; etc.
+function preferredMoodForSegment(segName) {
+  const n = (segName || '').toLowerCase();
+  if (n.includes('hook') || n.includes('before') || n.includes('intro') || n.includes('problem'))
+    return ['dramatic','gross-but-satisfying','satisfying','professional','educational','funny','wholesome'];
+  if (n.includes('reveal') || n.includes('after') || n.includes('result'))
+    return ['satisfying','gross-but-satisfying','dramatic','wholesome','professional','educational','funny'];
+  if (n.includes('tip') || n.includes('content') || n.includes('demo') || n.includes('process') || n.includes('work') || n.includes('solution'))
+    return ['educational','professional','satisfying','dramatic','funny','wholesome','gross-but-satisfying'];
+  if (n.includes('cta') || n.includes('end') || n.includes('outro'))
+    return ['professional','wholesome','satisfying','educational','funny','dramatic','gross-but-satisfying'];
+  return ['professional','satisfying','educational','dramatic','wholesome','funny','gross-but-satisfying'];
+}
+
 function fillSlotAuto(slotIdx, sharedUsed) {
   const q = queue[slotIdx];
   const tmpl = TEMPLATES.find(t => t.id === (q.tmplUsed || q.tmpl));
@@ -1923,14 +2137,54 @@ function fillSlotAuto(slotIdx, sharedUsed) {
 
   const segs = {};
   const usedHere = new Set();
+  let chosenStory = null;
 
-  tmpl.segments.forEach((seg, i) => {
-    const candidates = clips
-      .map(c => ({ c, score: scoreClipForTemplate(c, tmpl, new Set([...usedHere, ...sharedUsed])) }))
+  // ── Pass 1: prefer to pull from a single coherent story ──
+  if (STORIES.length) {
+    const ranked = STORIES
+      .map(s => ({ s, score: scoreStoryForTemplate(s, tmpl, sharedUsed) }))
       .filter(x => x.score > -100)
       .sort((a, b) => b.score - a.score);
-    if (!candidates.length) return;
-    const pick = candidates[0].c;
+    chosenStory = ranked[0]?.s || null;
+  }
+
+  tmpl.segments.forEach((seg, i) => {
+    const used = new Set([...usedHere, ...sharedUsed]);
+    const moodPrefs = preferredMoodForSegment(seg.name);
+    let pick = null;
+
+    // Try to pick within the chosen story first
+    if (chosenStory) {
+      const inStory = clips
+        .filter(c => c.clusterId === chosenStory.id && !used.has(c.id))
+        .map(c => {
+          let score = scoreClipForTemplate(c, tmpl, used);
+          // Mood-arc bias: bump score if clip mood matches the segment's preferred order
+          const moodIdx = moodPrefs.indexOf(c.aiAnalysis?.mood);
+          if (moodIdx >= 0) score += (10 - moodIdx) * 4;
+          return { c, score };
+        })
+        .filter(x => x.score > -100)
+        .sort((a, b) => b.score - a.score);
+      if (inStory.length) pick = inStory[0].c;
+    }
+
+    // Fallback: any clip — but still mood-biased
+    if (!pick) {
+      const all = clips
+        .map(c => {
+          let score = scoreClipForTemplate(c, tmpl, used);
+          const moodIdx = moodPrefs.indexOf(c.aiAnalysis?.mood);
+          if (moodIdx >= 0) score += (10 - moodIdx) * 3;
+          return { c, score };
+        })
+        .filter(x => x.score > -100)
+        .sort((a, b) => b.score - a.score);
+      if (all.length) pick = all[0].c;
+    }
+
+    if (!pick) return;
+
     const { trimStart, trimEnd } = trimForSegment(pick, seg);
     segs[i] = { clipId: pick.id, trimStart, trimEnd };
     usedHere.add(pick.id);
@@ -1948,6 +2202,9 @@ function fillSlotAuto(slotIdx, sharedUsed) {
   q.cta = getCTAForTemplate(tmpl.id);
   q.status = Object.keys(segs).length >= tmpl.segments.length ? 'ready' : 'partial';
   q.savedAt = new Date().toISOString();
+  q.storyId = chosenStory?.id || null;
+  q.storyTitle = chosenStory?.title || null;
+  q.storyArc = chosenStory?.arc || null;
   return true;
 }
 
