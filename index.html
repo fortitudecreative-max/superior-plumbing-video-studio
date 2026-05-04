@@ -1608,6 +1608,21 @@ function setTrim(i,type,val) {
 
 function clearTL() { segClips={}; renderTL(); updPreview(); }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ┌─ FUTURE CODE SPLIT SEAM ────────────────────────────────────────────┐
+// │ When this file approaches 200 KB and module separation becomes       │
+// │ unavoidable, the STORY CLUSTERING block below is the cleanest first  │
+// │ extraction point. It is well-isolated:                               │
+// │   • Single entry: clusterClips() (button onclick)                    │
+// │   • Single output: mutates clips[].clusterId + STORIES array         │
+// │   • Internal helpers: scoreStoryForTemplate, preferredMoodForSegment │
+// │   • UI: renderStoriesPanel + a per-clip color border in renderClips  │
+// │ Move this block + the two scoring helpers + STORIES into a separate  │
+// │ module (e.g. /clustering.js loaded as ES module). renderClips needs  │
+// │ no change beyond exposing storyColor on clip objects (already does). │
+// │ Cost: trivial — no shared mutable state besides the clips array.     │
+// └──────────────────────────────────────────────────────────────────────┘
+// ═══════════════════════════════════════════════════════════════════════
 // ─── STORY CLUSTERING ──────────────────────────────────
 // Sends all analyzed clips' metadata to GPT-4o in ONE batched call and gets
 // back a grouping into "stories" — sets of clips that came from the same job
@@ -2550,6 +2565,7 @@ function renderBrandForm() {
     <div class="brand-actions">
       <button class="brand-save" onclick="saveBrandForm()">💾 Save Changes</button>
       <button class="brand-save" style="background:var(--bg-elev);border:1px solid var(--primary);color:var(--primary);" onclick="makeActive('${c.id}')">⚡ Make Active</button>
+      <button class="brand-save" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text);" onclick="exportClient('${c.id}')">📤 Export Client</button>
       ${CLIENTS.length > 1 ? `<button class="brand-delete" onclick="deleteClient('${c.id}')">🗑 Delete Client</button>` : ''}
     </div>
   `;
@@ -2619,6 +2635,203 @@ function makeActive(id) {
   closeBrandModal();
 }
 
+// ═══════════════════════════════════════════════════════
+// EXPORT / IMPORT — backup and machine-portability
+// ═══════════════════════════════════════════════════════
+// Snapshots the entire localStorage state (or a single client) into a JSON
+// file the user can save anywhere — Drive, Dropbox, email — and restore later.
+// This is the only protection against losing real client data when localStorage
+// is wiped, the machine fails, or the operator switches computers.
+//
+// Format (versioned for forward-compat):
+//   { format: 'spvs-export', version: 1, kind: 'all'|'client',
+//     exportedAt: ISO string, clients: [...], activeClientId?: string }
+// Each client object embeds its data ({clips, queue, stories}) inline so the
+// import is a single round-trip.
+
+const EXPORT_FORMAT = 'spvs-export';
+const EXPORT_VERSION = 1;
+
+function _gatherClientPayload(clientId) {
+  const c = CLIENTS.find(x => x.id === clientId);
+  if (!c) return null;
+  let data = {};
+  try {
+    const raw = localStorage.getItem('sp_video_data_' + clientId);
+    if (raw) data = JSON.parse(raw);
+  } catch(e) { console.warn('export: failed to read client data', e); }
+  return { ...c, data };
+}
+
+function _downloadJSON(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+}
+
+function exportAllData() {
+  // Persist any in-memory edits before snapshotting
+  if (activeClientId) {
+    syncWorkspaceToActiveClient();
+    saveClientData(activeClientId);
+  }
+  saveClients();
+  const payload = {
+    format: EXPORT_FORMAT,
+    version: EXPORT_VERSION,
+    kind: 'all',
+    exportedAt: new Date().toISOString(),
+    activeClientId,
+    clients: CLIENTS.map(c => _gatherClientPayload(c.id)),
+  };
+  const stamp = new Date().toISOString().substring(0, 10);
+  _downloadJSON(`spvs-backup-all_${stamp}.json`, payload);
+  flashSaved && flashSaved();
+}
+
+function exportClient(clientId) {
+  // Persist any in-memory edits for this client first
+  if (clientId === activeClientId) {
+    syncWorkspaceToActiveClient();
+    saveClientData(clientId);
+  }
+  saveClients();
+  const c = _gatherClientPayload(clientId);
+  if (!c) { alert('Client not found.'); return; }
+  const payload = {
+    format: EXPORT_FORMAT,
+    version: EXPORT_VERSION,
+    kind: 'client',
+    exportedAt: new Date().toISOString(),
+    clients: [c],
+  };
+  const safe = (c.name || 'client').replace(/[^a-z0-9]+/gi, '_').toLowerCase().substring(0, 40);
+  const stamp = new Date().toISOString().substring(0, 10);
+  _downloadJSON(`spvs-backup-${safe}_${stamp}.json`, payload);
+  flashSaved && flashSaved();
+}
+
+function importFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  // Reset input so picking the same file again still triggers change
+  event.target.value = '';
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const payload = JSON.parse(e.target.result);
+      _applyImport(payload);
+    } catch(err) {
+      alert('Import failed: invalid JSON.\n\n' + (err.message || err));
+    }
+  };
+  reader.onerror = () => alert('Could not read the file.');
+  reader.readAsText(file);
+}
+
+function _applyImport(payload) {
+  if (!payload || payload.format !== EXPORT_FORMAT) {
+    alert('That file is not a Video Studio backup.');
+    return;
+  }
+  if (payload.version !== EXPORT_VERSION) {
+    if (!confirm(`This backup is version ${payload.version}; the app expects version ${EXPORT_VERSION}. Try to import anyway?`)) return;
+  }
+  if (!Array.isArray(payload.clients) || !payload.clients.length) {
+    alert('No clients found in this backup.');
+    return;
+  }
+
+  if (payload.kind === 'all') {
+    const msg = `Replace ALL ${CLIENTS.length} client(s) with ${payload.clients.length} from this backup? This wipes the current setup. (Your existing data will be exported as a safety copy first.)`;
+    if (!confirm(msg)) return;
+    // Safety auto-export of current state before destructive replace
+    try {
+      exportAllData();
+    } catch(e) { /* best-effort */ }
+    // Wipe existing per-client data namespaces
+    CLIENTS.forEach(c => localStorage.removeItem('sp_video_data_' + c.id));
+    CLIENTS.length = 0;
+    payload.clients.forEach(c => {
+      CLIENTS.push({
+        id: c.id, name: c.name, createdAt: c.createdAt,
+        gapi: c.gapi || {}, ai: c.ai || {}, brand: c.brand || { ...DEFAULT_BRAND },
+      });
+      if (c.data) {
+        try { localStorage.setItem('sp_video_data_' + c.id, JSON.stringify(c.data)); } catch(e) {}
+      }
+    });
+    activeClientId = (payload.activeClientId && CLIENTS.find(c => c.id === payload.activeClientId))
+      ? payload.activeClientId
+      : (CLIENTS[0]?.id || null);
+    saveClients();
+    syncActiveClientToWorkspace();
+    loadClientData(activeClientId);
+    applyClientBrand();
+    updateConnBadges();
+    renderClientSwitcher();
+    renderTmpls(); renderClips(); renderQueue(); renderTL(); updPreview();
+    editingClientId = activeClientId;
+    renderBrandClientList(); renderBrandForm();
+    alert(`Imported ${payload.clients.length} client(s) from backup.`);
+    return;
+  }
+
+  // kind === 'client' (single-client import)
+  const incoming = payload.clients[0];
+  if (!incoming || !incoming.id) { alert('Backup file is missing client identity.'); return; }
+  const existingIdx = CLIENTS.findIndex(c => c.id === incoming.id);
+  let action = 'add';
+  if (existingIdx >= 0) {
+    const choice = prompt(
+      `A client with ID ${incoming.id} (name "${CLIENTS[existingIdx].name}") already exists.\n\n` +
+      `Type "merge" to overwrite the existing client with the imported one,\n` +
+      `type "new" to add the import as a new client (regenerated ID),\n` +
+      `or "cancel" to abort.`,
+      'new'
+    );
+    if (!choice || choice.toLowerCase() === 'cancel') return;
+    action = choice.toLowerCase() === 'merge' ? 'merge' : 'new';
+  }
+
+  let newId = incoming.id;
+  if (action === 'new') {
+    newId = 'cl-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2,5);
+  }
+  const clientObj = {
+    id: newId,
+    name: action === 'new' ? incoming.name + ' (imported)' : incoming.name,
+    createdAt: incoming.createdAt || new Date().toISOString(),
+    gapi: incoming.gapi || {}, ai: incoming.ai || {},
+    brand: { ...DEFAULT_BRAND, ...(incoming.brand || {}) },
+  };
+  if (action === 'merge') {
+    CLIENTS[existingIdx] = clientObj;
+  } else {
+    CLIENTS.push(clientObj);
+  }
+  if (incoming.data) {
+    try { localStorage.setItem('sp_video_data_' + newId, JSON.stringify(incoming.data)); } catch(e) {}
+  }
+  saveClients();
+  // If we merged the active client, re-sync workspace
+  if (newId === activeClientId) {
+    syncActiveClientToWorkspace();
+    loadClientData(activeClientId);
+    applyClientBrand();
+    updateConnBadges();
+    renderClips(); renderQueue();
+  }
+  editingClientId = newId;
+  renderClientSwitcher();
+  renderBrandClientList(); renderBrandForm();
+  alert(`Imported "${clientObj.name}".`);
+}
+
 function deleteClient(id) {
   if (CLIENTS.length <= 1) { alert('Keep at least one client.'); return; }
   if (!confirm('Delete this client and ALL its clips/queue data? This cannot be undone.')) return;
@@ -2668,6 +2881,12 @@ function prefillWizard() {
         <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:1px;margin-bottom:10px;">Clients</div>
         <div id="brand-client-list"></div>
         <button class="brand-add-btn" onclick="createNewClient()">+ New Client</button>
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);">
+          <div style="font-size:9px;text-transform:uppercase;color:var(--text-muted);letter-spacing:1px;margin-bottom:8px;">Backup &amp; Transfer</div>
+          <button class="brand-add-btn" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text);" onclick="exportAllData()">📤 Export All Data</button>
+          <button class="brand-add-btn" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text);margin-top:6px;" onclick="document.getElementById('import-file-input').click()">📥 Import Backup</button>
+          <input type="file" id="import-file-input" accept=".json,application/json" style="display:none;" onchange="importFile(event)">
+        </div>
       </div>
       <div class="brand-form" id="brand-form">
         <p style="color:var(--text-muted);font-size:13px;">Pick a client on the left or create a new one.</p>
