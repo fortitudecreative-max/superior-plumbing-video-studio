@@ -963,6 +963,7 @@ function launchApp() {
   renderClips();
   renderQueue();
   renderStoriesPanel();
+  updateAnalyzeAllButton();
   updateStats();
 }
 
@@ -1069,36 +1070,70 @@ async function pullFromDrive() {
                 return;
               }
 
-              // Load clips as metadata only (no full download)
-              // Videos stream on-demand when added to timeline
+              // ── Delta ingestion ──
+              // Index clips by Drive file ID. New clips get added; existing clips
+              // keep their AI analysis intact and just refresh their access token
+              // (which expires after ~1 hour of OAuth session). Net effect:
+              // re-pulling on month two only adds the new clips of that month.
               const accessToken = tokenResponse.access_token;
-              let loaded = 0;
-              for (const file of allFiles) {
-                loaded++;
-                btn.textContent = `⏳ Indexing ${loaded}/${allFiles.length}: ${file.name}`;
+              const existingByDriveId = new Map();
+              clips.forEach(c => { if (c.driveId) existingByDriveId.set(c.driveId, c); });
+
+              let added = 0, refreshed = 0, total = allFiles.length;
+              for (let i = 0; i < allFiles.length; i++) {
+                const file = allFiles[i];
+                btn.textContent = `⏳ Indexing ${i+1}/${total}: ${file.name.substring(0,28)}`;
                 const streamUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`;
                 const sizeMB = file.size ? (parseInt(file.size) / (1024*1024)).toFixed(1) : '?';
-                const clip = {
-                  id: 'c-'+Date.now()+'-'+Math.random().toString(36).substr(2,4),
-                  name: file.name,
-                  driveId: file.id,
-                  streamUrl: streamUrl,
-                  accessToken: accessToken,
-                  thumbnail: file.thumbnailLink || null,
-                  size: file.size,
-                  sizeMB: sizeMB,
-                  mimeType: file.mimeType,
-                  createdTime: file.createdTime,
-                  duration: 0,
-                  tags: [],
-                  aiAnalysis: null,
-                  loaded: false
-                };
-                clip.tags = guessTagsFromName(file.name);
-                clips.push(clip);
+                const existing = existingByDriveId.get(file.id);
+                if (existing) {
+                  // Refresh the token + any volatile fields, leave analysis alone
+                  existing.streamUrl = streamUrl;
+                  existing.accessToken = accessToken;
+                  existing.thumbnail = file.thumbnailLink || existing.thumbnail;
+                  existing.size = file.size || existing.size;
+                  existing.sizeMB = sizeMB;
+                  existing.url = null;       // blob URL is session-scoped
+                  existing.loaded = false;
+                  refreshed++;
+                } else {
+                  const clip = {
+                    id: 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2,5),
+                    name: file.name,
+                    driveId: file.id,
+                    streamUrl, accessToken,
+                    thumbnail: file.thumbnailLink || null,
+                    size: file.size, sizeMB,
+                    mimeType: file.mimeType,
+                    createdTime: file.createdTime,
+                    duration: 0,
+                    tags: guessTagsFromName(file.name),
+                    aiAnalysis: null,
+                    loaded: false,
+                  };
+                  clips.push(clip);
+                  added++;
+                }
               }
+
+              // Track library age for the operator
+              const c = getActiveClient();
+              if (c) {
+                c.brand = c.brand || {};
+                c.brand.lastPullAt = new Date().toISOString();
+                c.brand.lastPullCount = total;
+                saveClients();
+              }
+
               renderClips();
               updateStats();
+              if (activeClientId) saveClientData(activeClientId);
+
+              // Friendly summary on the button
+              btn.textContent = added === 0
+                ? `✓ ${refreshed} clips already indexed (no new files)`
+                : `✓ ${added} new clip${added===1?'':'s'} added (${refreshed} kept)`;
+              setTimeout(() => { btn.textContent = '📁 Pull from Google Drive'; }, 4000);
 
               resolve();
             }
@@ -1325,6 +1360,8 @@ Return this exact JSON:
   }
 
   renderClips();
+  // Durable: persist this clip's hard-won $0.05 of analysis immediately.
+  if (activeClientId) saveClientData(activeClientId);
 }
 
 async function autoFillAI() {
@@ -1488,6 +1525,25 @@ function renderTL() {
   }).join('');
 }
 
+// Returns count of clips with no AI analysis yet — used to label the Analyze button
+function unanalyzedCount() {
+  return clips.filter(c => !c.aiAnalysis).length;
+}
+
+function updateAnalyzeAllButton() {
+  const btn = document.getElementById('analyze-all-btn');
+  if (!btn || btn.disabled) return;
+  if (!CONFIG.ai.enabled) return;
+  const todo = unanalyzedCount();
+  if (todo === 0 && clips.length > 0) {
+    btn.textContent = '✓ All clips analyzed';
+  } else if (todo > 0) {
+    btn.textContent = `🤖 Analyze ${todo} new clip${todo===1?'':'s'}`;
+  } else {
+    btn.textContent = '🤖 Analyze All Clips';
+  }
+}
+
 function renderClips() {
   const g = document.getElementById('cgrid');
   g.innerHTML = clips.map(cl => {
@@ -1527,6 +1583,8 @@ function renderClips() {
     ${CONFIG.ai.enabled ? `<div style="margin-top:6px;"><div class="ai-bar" style="background:linear-gradient(90deg,var(--green) ${analyzed/clips.length*100}%,var(--border) ${analyzed/clips.length*100}%)"></div><div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${analyzed}/${clips.length} clips analyzed by AI</div></div>` : ''}
     <div class="ai-suggestion"><strong>Suggestion:</strong> You have enough footage for ${Object.keys(tc).length} content pillars. ${clips.length>=7?'Ready to start assembling videos!':'Upload more clips to fill the month.'}</div>
   </div>`;
+
+  updateAnalyzeAllButton();
 
   // Show AI rec panel if a clip is selected/available
   if (clips.length > 0 && clips[clips.length-1].aiAnalysis) {
@@ -1746,6 +1804,8 @@ Every clip index 0..${items.length-1} MUST appear in exactly one story. Even sin
   STORIES.length = 0;
   result.stories.forEach(s => STORIES.push(s));
   saveQueueState();
+  const _clC = getActiveClient();
+  if (_clC) { _clC.brand.lastClusterAt = new Date().toISOString(); saveClients(); }
 
   btn.disabled = false;
   btn.textContent = `✓ ${STORIES.length} stories found`;
@@ -1818,6 +1878,11 @@ async function analyzeAllClips() {
     renderClips();
     updateStats();
   }
+  // Final save in case any analysis call landed without persisting (defensive)
+  if (activeClientId) saveClientData(activeClientId);
+  // Stamp library age
+  const _aaC = getActiveClient();
+  if (_aaC) { _aaC.brand.lastAnalyzeAt = new Date().toISOString(); saveClients(); }
   btn.disabled = false;
   btn.textContent = failed
     ? `⚠️  Done — ${todo.length - failed}/${todo.length} analyzed (${failed} failed)`
@@ -2515,6 +2580,30 @@ function renderBrandForm() {
       <div class="brand-form-row full">
         <label>Hashtag Stack (auto-appended to EDLs / social copy)</label>
         <textarea id="bf-hashtags">${escapeHtml(b.hashtags)}</textarea>
+      </div>
+    </div>
+
+    <div class="brand-form-section">Library Age</div>
+    <div class="brand-form-grid">
+      <div class="brand-form-row full">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11px;line-height:1.7;color:var(--text-muted);">
+          ${(() => {
+            const data = (() => { try { return JSON.parse(localStorage.getItem('sp_video_data_' + c.id) || '{}'); } catch(e) { return {}; } })();
+            const clipCount = (data.clips || []).length;
+            const analyzedCount = (data.clips || []).filter(x => x.aiAnalysis).length;
+            const storyCount = (data.stories || []).length;
+            const queueReady = (data.queue || []).filter(x => x.status === 'ready').length;
+            const fmt = iso => iso ? new Date(iso).toLocaleString() : '<span style="color:var(--text-dim);">never</span>';
+            const estSpend = (analyzedCount * 0.07).toFixed(2);
+            return `
+              <div><strong style="color:var(--text);">Clips:</strong> ${clipCount} indexed · ${analyzedCount} analyzed · ${storyCount} stories · ${queueReady}/30 queue ready</div>
+              <div><strong style="color:var(--text);">Last pull:</strong> ${fmt(b.lastPullAt)}</div>
+              <div><strong style="color:var(--text);">Last analyze:</strong> ${fmt(b.lastAnalyzeAt)}</div>
+              <div><strong style="color:var(--text);">Last cluster:</strong> ${fmt(b.lastClusterAt)}</div>
+              <div><strong style="color:var(--text);">Estimated AI spend:</strong> ~$${estSpend} (cumulative across this client)</div>
+            `;
+          })()}
+        </div>
       </div>
     </div>
 
