@@ -2142,7 +2142,7 @@ function renderQueue() {
         <div class="q-sub">${dn} May ${q.day} · ${escapeHtml(q.storyJobCategory || q.pillar || '')}${segMeta}</div>
       </div>
       <span class="q-badge ${sc}">${st}</span>
-      <button onclick="event.stopPropagation();aiEditQueueSlot(${i})" title="AI editor — re-edit this video using transcripts + multi-frame analysis (~$0.20)" style="background:var(--bg-elev);border:1px solid var(--primary);color:var(--primary);padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;margin-right:4px;">🧠 AI Edit</button>
+      <button onclick="event.stopPropagation();aiEditQueueSlot(${i})" title="AI editor — re-edit this video using transcripts + AI analysis (~$0.05)" style="background:var(--bg-elev);border:1px solid var(--primary);color:var(--primary);padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;margin-right:4px;">🧠 AI Edit</button>
       ${canExport ? `<button onclick="event.stopPropagation();exportQueueSlot(${i})" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;">📤 EDL</button>` : ''}
     </div>`;
   }).join('');
@@ -3161,27 +3161,24 @@ async function aiEditStoryToVideo(clipPool, opts) {
 
   if (!clipPool.length) throw new Error('No clips provided');
 
-  // Extract keyframes for every clip — done in parallel for speed
-  const enriched = await Promise.all(clipPool.map(async (c, i) => {
-    let frames = [];
-    try { frames = await extractKeyframes(c, 3); } catch (e) {
-      console.warn('keyframe extraction failed for', c.name, e);
-    }
-    return {
-      idx: i, c,
-      summary: {
-        idx: i,
-        name: c.name?.substring(0,40),
-        durationS: Math.round(c.duration || 0),
-        jobCategory: clipCategory(c),
-        clipRole: c.aiAnalysis?.clipRole || null,
-        mood: c.aiAnalysis?.mood || null,
-        spoken: (c.transcript?.text || '').substring(0, 800),
-        // Word-level timestamps so the editor knows exactly where sentences end
-        sentenceEnds: c.transcript?.boundaries || [],
-      },
-      frames,
-    };
+  // Text-only context — no video seeking. Faster, more reliable, ~4x cheaper.
+  // (Multi-frame visual context can be re-added later as opt-in once base path
+  // is proven, since the underlying analysis already carries content_description.)
+  const enriched = clipPool.map((c, i) => ({
+    idx: i, c,
+    summary: {
+      idx: i,
+      name: c.name?.substring(0, 40),
+      durationS: Math.round(c.duration || 0),
+      jobCategory: clipCategory(c),
+      clipRole: c.aiAnalysis?.clipRole || null,
+      mood: c.aiAnalysis?.mood || null,
+      visualDescription: (c.aiAnalysis?.content_description || c.aiAnalysis?.suggested_clip_description || '').substring(0, 400),
+      tags: (c.aiAnalysis?.tags || []).slice(0, 6),
+      spoken: (c.transcript?.text || '').substring(0, 800),
+      sentenceEnds: c.transcript?.boundaries || [],
+    },
+    frames: [],
   }));
 
   // Build the editor's rule book — these are the rules the AI follows
@@ -3237,26 +3234,26 @@ OUTPUT FORMAT — return EXACTLY this JSON object:
 
 CRITICAL: trimStart/trimEnd must be valid timestamps within the clip's duration AND should align with sentenceEnds[] when speech is involved. The TOTAL of (trimEnd - trimStart) across all edits should equal ${targetDur} seconds (±2s).`;
 
-  // Build the multi-modal user message
-  const content = [
-    { type: 'text', text: rules + '\n\nAVAILABLE CLIPS:\n' },
-  ];
+  // Build a single text prompt — no image content, fast and cheap
+  let body = rules + '\n\nAVAILABLE CLIPS:\n';
   for (const e of enriched) {
-    content.push({ type: 'text', text: `
-=== Clip ${e.idx}: ${e.summary.name} (${e.summary.durationS}s, ${e.summary.jobCategory}) ===
-Spoken: ${e.summary.spoken || '(no speech)'}
-Safe cut points (sentence ends): ${e.summary.sentenceEnds.map(s => s.toFixed(1)).join(', ')}
-Keyframes (start, middle, end):` });
-    for (const f of e.frames) content.push({ type: 'image_url', image_url: { url: f, detail: 'low' } });
+    body += `\n=== Clip ${e.idx}: ${e.summary.name} (${e.summary.durationS}s) ===\n`;
+    body += `Job: ${e.summary.jobCategory} | Role: ${e.summary.clipRole || 'unknown'} | Mood: ${e.summary.mood || 'unknown'}\n`;
+    if (e.summary.visualDescription) body += `Visual: ${e.summary.visualDescription}\n`;
+    if (e.summary.tags.length) body += `Tags: ${e.summary.tags.join(', ')}\n`;
+    body += `Spoken: ${e.summary.spoken || '(no speech)'}\n`;
+    if (e.summary.sentenceEnds.length) body += `Safe cut points: ${e.summary.sentenceEnds.map(s => s.toFixed(1)).join('s, ')}s\n`;
   }
-  content.push({ type: 'text', text: `\n\nNow EDIT these clips into a coherent ${targetDur}-second video following all the editorial rules above. Return only the JSON object.` });
+  body += `\n\nNow EDIT these clips into a coherent ${targetDur}-second video following all the editorial rules above. Return only the JSON object.`;
+
+  const content = body;
 
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
     body: JSON.stringify({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content }],
+      messages: [{ role: 'user', content: content }],
       max_tokens: 1500,
       response_format: { type: 'json_object' },
       temperature: 0.4,
@@ -3368,7 +3365,7 @@ async function aiEditQueueSlot(slotIdx) {
   if (!confirm(`Run AI Editor on Day ${q.day} ("${q.title}")?
 
 • ${clipPool.length} clips will be sent to GPT-4o with full transcripts and 3 keyframes each.
-• Cost ~$0.15-0.25.
+• Cost ~$0.04-0.08.
 • The AI will produce a real edit (cuts, trims, captions, hook, title) following editorial rules.
 • Existing assignments for this slot will be replaced.`)) return;
 
