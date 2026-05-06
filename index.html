@@ -148,6 +148,24 @@
   .phone .ovr { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
   .ovr-hook { background: rgba(0,0,0,.65); color: white; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 5px; text-align: center; backdrop-filter: blur(4px); transition: opacity 0.4s ease; }
   .ovr-cta { background: var(--primary); color: white; font-size: 10px; font-weight: 600; padding: 6px 10px; border-radius: 5px; text-align: center; transition: opacity 0.4s ease; opacity: 0; }
+  .ovr-caption {
+    position: absolute; bottom: 80px; left: 8px; right: 8px;
+    color: white; font-family: 'Inter', sans-serif; font-weight: 700;
+    font-size: 12px; line-height: 1.3; text-align: center;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.7);
+    padding: 4px 8px; pointer-events: none; min-height: 18px;
+  }
+  .scrubber-wrap { width: 240px; margin-top: 8px; }
+  .scrubber {
+    width: 100%; height: 6px; background: var(--bg-card-hover);
+    border-radius: 3px; cursor: pointer; position: relative; overflow: hidden;
+  }
+  .scrubber-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--primary); width: 0%; transition: width 0.05s linear;
+  }
+  .scrubber-segs { position: absolute; inset: 0; pointer-events: none; }
+  .scrubber-seg-mark { position: absolute; width: 1px; background: rgba(255,255,255,0.4); height: 100%; }
   .ovr-wm { position: absolute; bottom: 32px; right: 10px; color: rgba(255,255,255,.4); font-size: 7px; font-weight: 700; letter-spacing: 0.5px; min-width: 60px; min-height: 24px; display: flex; align-items: flex-end; justify-content: flex-end; pointer-events: none; }
   .ovr-wm img { display: block; max-height: 32px; max-width: 80px; height: auto; width: auto; object-fit: contain; opacity: 0.85; }
   .controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
@@ -481,6 +499,7 @@
         <video id="pvid" style="display:none" muted></video>
         <div class="ovr" id="ovr" style="display:none">
           <div class="ovr-hook" id="o-hook">Hook text</div>
+          <div class="ovr-caption" id="o-caption" style="display:none"></div>
           <div>
             <div class="ovr-wm" style="display:none;"></div>
             <div class="ovr-cta" id="o-cta"></div>
@@ -492,13 +511,25 @@
         <button class="ctrl-btn" onclick="resetPreview()">⏮ Reset</button>
         <span class="ctrl-time" id="ptime">0:00 / 0:00</span>
       </div>
+      <div class="scrubber-wrap" id="scrubber-wrap" style="display:none;">
+        <div class="scrubber" id="scrubber" onclick="seekToFraction(event)">
+          <div class="scrubber-fill" id="scrubber-fill"></div>
+          <div class="scrubber-segs" id="scrubber-segs"></div>
+        </div>
+      </div>
 
       <!-- Text overlays -->
       <div class="txt-panel">
         <h4>Text Overlays</h4>
         <div class="txt-grp"><label>Hook (first 3s)</label><input id="hook-txt" placeholder="e.g. The start of a rough night" oninput="updOvr()"></div>
         <div class="txt-grp"><label>CTA (last 5s)</label><input id="cta-txt" placeholder="(uses brand default if empty)" oninput="updOvr()"></div>
-        <div class="txt-grp"><label>Video Title</label><input id="vid-title" placeholder="e.g. 6 AM start"></div>
+        <div class="txt-grp">
+          <label>Video Title</label>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <input id="vid-title" placeholder="e.g. 6 AM start" style="flex:1;">
+            <button onclick="regenerateTitle()" title="AI regenerate title from current clips" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text-muted);padding:5px 8px;border-radius:4px;font-size:11px;cursor:pointer;">🔄</button>
+          </div>
+        </div>
       </div>
 
       <!-- AI Recommendations -->
@@ -965,27 +996,27 @@ const TEMPLATES = [
       {name:'Solution',dur:15,color:'#27AE60',desc:'Show the fix'},
       {name:'CTA',dur:5,color:'#2E75B6',desc:'Call to action'},
     ]},
-  { id:'before-after', name:'Before & After', dur:'15-30s', color:'#E67E22', icon:'🔄',
+  { id:'before-after', name:'Before & After', dur:'25s', color:'#E67E22', icon:'🔄',
     segments:[
       {name:'Hook / Before',dur:5,color:'#E74C3C',desc:'Show the problem'},
       {name:'The Work',dur:12,color:'#E67E22',desc:'Timelapse of the fix'},
       {name:'Reveal + CTA',dur:8,color:'#27AE60',desc:'Satisfying after'},
     ]},
-  { id:'day-in-life', name:'Day in the Life', dur:'45-60s', color:'#2E75B6', icon:'🌅',
+  { id:'day-in-life', name:'Day in the Life', dur:'30s', color:'#2E75B6', icon:'🌅',
     segments:[
-      {name:'Morning',dur:8,color:'#F1C40F',desc:'Alarm, coffee, truck'},
-      {name:'Job 1',dur:12,color:'#2E75B6',desc:'First job'},
-      {name:'Job 2',dur:12,color:'#8E44AD',desc:'Second highlight'},
-      {name:'Midday',dur:8,color:'#E67E22',desc:'Lunch, funny moment'},
-      {name:'Wrap-up',dur:8,color:'#27AE60',desc:'End of day'},
+      {name:'Morning',dur:5,color:'#F1C40F',desc:'Quick context — arrival, gear up'},
+      {name:'Job 1',dur:8,color:'#2E75B6',desc:'First job, key moment'},
+      {name:'Job 2',dur:8,color:'#8E44AD',desc:'Second highlight'},
+      {name:'Midday',dur:5,color:'#E67E22',desc:'Quick beat — funny / human'},
+      {name:'Wrap-up',dur:4,color:'#27AE60',desc:'End of day'},
     ]},
-  { id:'testimonial', name:'Customer Testimonial', dur:'15-30s', color:'#8E44AD', icon:'⭐',
+  { id:'testimonial', name:'Customer Testimonial', dur:'25s', color:'#8E44AD', icon:'⭐',
     segments:[
       {name:'Your Intro',dur:5,color:'#2E75B6',desc:'"We just finished..."'},
       {name:'Customer Speaks',dur:15,color:'#8E44AD',desc:'Natural testimonial'},
       {name:'Your Close',dur:5,color:'#27AE60',desc:'Sign off + number'},
     ]},
-  { id:'trending', name:'Trending / Culture', dur:'15-30s', color:'#F1C40F', icon:'🔥',
+  { id:'trending', name:'Trending / Culture', dur:'25s', color:'#F1C40F', icon:'🔥',
     segments:[
       {name:'Hook',dur:5,color:'#E74C3C',desc:'Trending audio/visual'},
       {name:'Content',dur:15,color:'#F1C40F',desc:'The moment'},
@@ -1648,6 +1679,60 @@ const templatePillarMap = {
   'trending': 'Personality',
 };
 
+async function regenerateTitle() {
+  if (!CONFIG.ai.enabled || CONFIG.ai.provider !== 'openai') {
+    alert('Title regeneration requires OpenAI provider.');
+    return;
+  }
+  if (!selTmpl || !Object.keys(segClips).length) {
+    alert('Build a video on the timeline first.');
+    return;
+  }
+  const titleEl = document.getElementById('vid-title');
+  const oldText = titleEl.value;
+  titleEl.value = '⏳ generating…';
+  titleEl.disabled = true;
+
+  const summary = Object.entries(segClips).map(([i, cd]) => {
+    const cl = clips.find(c => c.id === cd.clipId);
+    if (!cl) return null;
+    return {
+      seg: selTmpl.segments[i]?.name,
+      title: cl.aiAnalysis?.suggested_clip_title,
+      desc:  cl.aiAnalysis?.suggested_clip_description,
+      transcript: cl.transcript?.text?.substring(0, 120),
+      category: clipCategory(cl),
+    };
+  }).filter(Boolean);
+
+  const prompt = `Generate ONE punchy 4-8 word video title for a Facebook/TikTok short-form video. Voice: ${BRAND.hookTone || 'storyteller'} — conversational, curiosity-driven, NOT promotional.
+
+The video uses the "${selTmpl.name}" template and assembles these clips in order:
+${JSON.stringify(summary, null, 1)}
+
+Return ONLY the title text, nothing else. No quotes, no period at the end.`;
+
+  try {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 50,
+        temperature: 0.8,
+      })
+    });
+    const data = await resp.json();
+    const newTitle = data.choices?.[0]?.message?.content?.trim().replace(/^["']|["']$/g, '');
+    titleEl.value = newTitle || oldText;
+  } catch (e) {
+    console.warn('Title regen failed', e);
+    titleEl.value = oldText;
+  }
+  titleEl.disabled = false;
+}
+
 function applyAIRec() {
   // Apply the AI recommendation shown in the panel into the editor inputs
   const recTmpl  = document.getElementById('rec-tmpl').dataset.id;
@@ -1714,6 +1799,7 @@ function renderTL() {
         </div>` : 'Drop clip here'}
       </div></div>`;
   }).join('');
+  if (typeof renderScrubber === 'function') renderScrubber();
 }
 
 // Returns count of clips with no AI analysis yet — used to label the Analyze button
@@ -2017,23 +2103,29 @@ function updateTranscribeButton() {
 }
 
 // ─── SENTENCE-BOUNDARY-AWARE TRIM SNAPPING ──────────────
-// Given a proposed second-mark, return the nearest "safe cut" — i.e. a
-// sentence boundary in the clip's transcript — within a tolerance window.
-// Falls back to the proposed value if no transcript or no nearby boundary.
-function snapToSentenceBoundary(clip, secondMark, toleranceSeconds) {
-  if (toleranceSeconds == null) toleranceSeconds = 2;
+// Asymmetric: trims always extend rather than truncate speech.
+//   • snapTrimStart: pull start back to the nearest sentence boundary at/before mark
+//   • snapTrimEnd:   push end forward to the nearest sentence boundary at/after mark
+function snapTrimStart(clip, secondMark) {
   const bounds = clip.transcript?.boundaries;
   if (!bounds || !bounds.length) return secondMark;
-  // Find nearest boundary
   let best = secondMark;
-  let bestDist = Infinity;
   for (const b of bounds) {
-    const d = Math.abs(b - secondMark);
-    if (d < bestDist) { bestDist = d; best = b; }
+    if (b <= secondMark + 0.2 && (best === secondMark || b > best)) best = b;
   }
-  if (bestDist > toleranceSeconds) return secondMark;
   return best;
 }
+function snapTrimEnd(clip, secondMark) {
+  const bounds = clip.transcript?.boundaries;
+  if (!bounds || !bounds.length) return secondMark;
+  let best = secondMark;
+  let foundExt = false;
+  for (const b of bounds) {
+    if (b >= secondMark - 0.2 && (!foundExt || b < best)) { best = b; foundExt = true; }
+  }
+  return best;
+}
+function snapToSentenceBoundary(clip, secondMark, _t) { return snapTrimEnd(clip, secondMark); }
 
 // ═══════════════════════════════════════════════════════════════════════
 // ┌─ FUTURE CODE SPLIT SEAM ────────────────────────────────────────────┐
@@ -2608,10 +2700,10 @@ function trimForSegment(clip, seg) {
     trimStart = Math.max(0, Math.min(trimStart, Math.max(0, dur - 0.5)));
     trimEnd = Math.min(trimStart + seg.dur, dur);
   }
-  // Snap both ends to sentence boundaries when transcript is available.
-  // No more cuts mid-word — speech finishes naturally before the cut.
-  trimStart = snapToSentenceBoundary(clip, trimStart, 1.5);
-  trimEnd   = snapToSentenceBoundary(clip, trimEnd, 1.5);
+  // Asymmetric snap — start pulls back to previous sentence boundary,
+  // end pushes forward to next. Speech is never cut mid-word.
+  trimStart = snapTrimStart(clip, trimStart);
+  trimEnd   = snapTrimEnd(clip, trimEnd);
   // Sanity: ensure end > start, and end fits within clip duration
   if (trimEnd <= trimStart) trimEnd = Math.min(trimStart + seg.dur, dur);
   trimEnd = Math.min(trimEnd, dur);
@@ -2953,10 +3045,6 @@ async function playNext() {
   try { await v.play(); } catch(e) { console.warn('play() rejected', e); }
   selTmpl.segments.forEach((_,i)=>{ const el=document.getElementById('seg-'+i); if(el) el.style.borderColor=i===playIdx?'var(--primary)':'var(--border)'; });
 
-  // Hook + CTA timing — match the EDL spec the editor will follow:
-  //  • Hook overlay: first 3 seconds of segment 0 only
-  //  • CTA overlay: last 5 seconds of the LAST segment only
-  //  • Watermark: always visible
   const isFirstSeg = playIdx === 0;
   const isLastSeg  = playIdx === selTmpl.segments.length - 1;
   const segDur     = cd.trimEnd - cd.trimStart;
@@ -2964,17 +3052,125 @@ async function playNext() {
   const ctaEl  = document.getElementById('o-cta');
   if (hookEl) hookEl.style.opacity = isFirstSeg ? '1' : '0';
   if (ctaEl)  ctaEl.style.opacity  = '0';
-  // Reveal CTA in the final 5 seconds of the final segment
   if (isLastSeg && ctaEl) {
     const ctaShowAt = Math.max(0, segDur - 5);
     setTimeout(() => { if (playing && playIdx === selTmpl.segments.length - 1) ctaEl.style.opacity = '1'; }, ctaShowAt * 1000);
   }
-  // Hide hook after first 3 seconds of segment 0
   if (isFirstSeg && hookEl) {
     setTimeout(() => { if (playing) hookEl.style.opacity = '0'; }, Math.min(3, segDur) * 1000);
   }
 
-  playTimer = setTimeout(()=>{ v.pause(); playIdx++; playNext(); }, segDur * 1000);
+  // Live captions + scrubber tracking via timeupdate
+  const captionEl = document.getElementById('o-caption');
+  if (captionEl) captionEl.style.display = 'block';
+  const onTimeUpdate = () => {
+    const tInClip = v.currentTime;
+    if (cl.transcript?.words?.length && captionEl) {
+      const active = [];
+      const lookback = Math.max(0, tInClip - 0.5);
+      for (const w of cl.transcript.words) {
+        if (w.e >= lookback && w.s <= tInClip + 0.05) active.push(w.w.trim());
+        if (w.s > tInClip + 0.1) break;
+      }
+      captionEl.textContent = active.slice(-3).join(' ');
+    }
+    updateScrubber(tInClip);
+  };
+  v.addEventListener('timeupdate', onTimeUpdate);
+  playTimer = setTimeout(() => {
+    v.pause();
+    v.removeEventListener('timeupdate', onTimeUpdate);
+    if (captionEl && playIdx >= selTmpl.segments.length - 1) captionEl.textContent = '';
+    playIdx++;
+    playNext();
+  }, segDur * 1000);
+}
+
+function totalAssembledDuration() {
+  if (!selTmpl) return 0;
+  return selTmpl.segments.reduce((sum, seg, i) => {
+    const cd = segClips[i];
+    if (cd) return sum + (cd.trimEnd - cd.trimStart);
+    return sum + seg.dur;
+  }, 0);
+}
+function elapsedBeforeSegment(idx) {
+  let sum = 0;
+  for (let i = 0; i < idx; i++) {
+    const cd = segClips[i];
+    if (cd) sum += (cd.trimEnd - cd.trimStart);
+    else sum += selTmpl.segments[i].dur;
+  }
+  return sum;
+}
+function updateScrubber(tInClip) {
+  const cd = segClips[playIdx];
+  if (!cd) return;
+  const total = totalAssembledDuration();
+  const before = elapsedBeforeSegment(playIdx);
+  const within = Math.max(0, tInClip - cd.trimStart);
+  const elapsed = before + within;
+  const fill = document.getElementById('scrubber-fill');
+  if (fill && total > 0) fill.style.width = Math.min(100, (elapsed / total) * 100) + '%';
+  const time = document.getElementById('ptime');
+  if (time) time.textContent = `${fmtT(elapsed)} / ${fmtT(total)}`;
+}
+function renderScrubber() {
+  const wrap = document.getElementById('scrubber-wrap');
+  const segsEl = document.getElementById('scrubber-segs');
+  const fill = document.getElementById('scrubber-fill');
+  if (!wrap) return;
+  if (!selTmpl || !Object.keys(segClips).length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  const total = totalAssembledDuration();
+  let cumulative = 0;
+  if (segsEl) segsEl.innerHTML = '';
+  selTmpl.segments.forEach((seg, i) => {
+    const cd = segClips[i];
+    const dur = cd ? (cd.trimEnd - cd.trimStart) : seg.dur;
+    cumulative += dur;
+    if (i < selTmpl.segments.length - 1 && total > 0 && segsEl) {
+      const mark = document.createElement('div');
+      mark.className = 'scrubber-seg-mark';
+      mark.style.left = ((cumulative / total) * 100) + '%';
+      segsEl.appendChild(mark);
+    }
+  });
+  if (fill) fill.style.width = '0%';
+  const time = document.getElementById('ptime');
+  if (time) time.textContent = `0:00 / ${fmtT(total)}`;
+}
+function seekToFraction(event) {
+  if (!selTmpl || !Object.keys(segClips).length) return;
+  const sb = document.getElementById('scrubber');
+  const rect = sb.getBoundingClientRect();
+  const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const total = totalAssembledDuration();
+  const target = fraction * total;
+  let cumulative = 0;
+  for (let i = 0; i < selTmpl.segments.length; i++) {
+    const cd = segClips[i];
+    const dur = cd ? (cd.trimEnd - cd.trimStart) : selTmpl.segments[i].dur;
+    if (cumulative + dur >= target) {
+      const offsetInSeg = target - cumulative;
+      const v = document.getElementById('pvid');
+      if (playing) { v.pause(); clearTimeout(playTimer); }
+      playIdx = i;
+      const cl = cd ? clips.find(c => c.id === cd.clipId) : null;
+      if (cl && cl.url && cd) {
+        v.src = cl.url;
+        v.currentTime = cd.trimStart + offsetInSeg;
+        updateScrubber(cd.trimStart + offsetInSeg);
+        if (playing) {
+          v.play().catch(()=>{});
+          const remaining = (cd.trimEnd - cd.trimStart) - offsetInSeg;
+          playTimer = setTimeout(() => { v.pause(); playIdx++; playNext(); }, Math.max(0, remaining * 1000));
+        }
+      }
+      return;
+    }
+    cumulative += dur;
+  }
 }
 
 function resetPreview() {
@@ -2984,12 +3180,16 @@ function resetPreview() {
   playIdx=0;
   const v=document.getElementById('pvid');
   v.pause();
-  // Restore default static preview state: hook visible, CTA hidden
   const hookEl = document.getElementById('o-hook');
   const ctaEl  = document.getElementById('o-cta');
+  const capEl  = document.getElementById('o-caption');
   if (hookEl) hookEl.style.opacity = '1';
   if (ctaEl)  ctaEl.style.opacity = '0';
+  if (capEl)  { capEl.textContent = ''; capEl.style.display = 'none'; }
+  const fill = document.getElementById('scrubber-fill');
+  if (fill) fill.style.width = '0%';
   updPreview();
+  renderScrubber();
 }
 
 // ═══════════════════════════════════════
