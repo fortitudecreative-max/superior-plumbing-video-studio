@@ -146,8 +146,8 @@
   .phone .empty { color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px; position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .phone .empty .e-icon { font-size: 36px; margin-bottom: 10px; }
   .phone .ovr { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
-  .ovr-hook { background: rgba(0,0,0,.65); color: white; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 5px; text-align: center; backdrop-filter: blur(4px); }
-  .ovr-cta { background: var(--primary); color: white; font-size: 10px; font-weight: 600; padding: 6px 10px; border-radius: 5px; text-align: center; }
+  .ovr-hook { background: rgba(0,0,0,.65); color: white; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 5px; text-align: center; backdrop-filter: blur(4px); transition: opacity 0.4s ease; }
+  .ovr-cta { background: var(--primary); color: white; font-size: 10px; font-weight: 600; padding: 6px 10px; border-radius: 5px; text-align: center; transition: opacity 0.4s ease; opacity: 0; }
   .ovr-wm { position: absolute; bottom: 32px; right: 10px; color: rgba(255,255,255,.4); font-size: 7px; font-weight: 700; letter-spacing: 0.5px; }
   .controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
   .ctrl-btn { background: var(--bg-card); border: 1px solid var(--border); color: white; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
@@ -832,7 +832,7 @@ function loadConfig() {
     const v1Queue = localStorage.getItem('sp_video_queue');
     const c = newClientObject('Superior Plumbing');
     c.brand.watermarkText = 'SUPERIOR PLUMBING';
-    c.brand.defaultCTA = 'Call Superior Plumbing';
+    c.brand.defaultCTA = 'Call Now';
     c.brand.hashtags = '#plumbing #serviceplumber #plumblife';
     c.brand.jobCategories = SUPERIOR_PLUMBING_CATEGORIES_DEFAULT;
     if (v1) {
@@ -915,11 +915,20 @@ function applyClientBrand() {
   root.style.setProperty('--primary', BRAND.primary);
   root.style.setProperty('--primary-dark', BRAND.primaryDark);
   root.style.setProperty('--green', BRAND.secondary);
-  // Watermark text
+  // Watermark — prefer uploaded logo image when present, fall back to text mark.
+  // Always show SOMETHING in the preview if either is configured (logo XOR text).
   const wm = document.querySelector('.ovr-wm');
   if (wm) {
-    wm.textContent = BRAND.watermarkText || '';
-    wm.style.display = (BRAND.watermarkEnabled && BRAND.watermarkText) ? 'block' : 'none';
+    if (BRAND.logoDataUrl) {
+      wm.innerHTML = `<img src="${BRAND.logoDataUrl}" style="max-height:32px;max-width:80px;object-fit:contain;opacity:0.85;display:block;">`;
+      wm.style.display = 'block';
+    } else if (BRAND.watermarkEnabled && BRAND.watermarkText) {
+      wm.textContent = BRAND.watermarkText;
+      wm.style.display = 'block';
+    } else {
+      wm.textContent = '';
+      wm.style.display = 'none';
+    }
   }
   // Caption position class on overlay
   const ovr = document.getElementById('ovr');
@@ -2376,11 +2385,11 @@ function trimForSegment(clip, seg) {
 function getCTAForTemplate(tmplId) {
   if (BRAND && BRAND.defaultCTA) return BRAND.defaultCTA;
   const M = {
-    'quick-tip': 'Follow for more tips!',
-    'before-after': 'Book your service today',
-    'day-in-life': 'See more like this',
-    'testimonial': 'Book your service now',
-    'trending': 'We get it done',
+    'quick-tip': 'Follow for more',
+    'before-after': 'Book today',
+    'day-in-life': 'Watch more',
+    'testimonial': 'Book now',
+    'trending': 'Get it done',
   };
   return M[tmplId] || 'Get in touch';
 }
@@ -2655,7 +2664,13 @@ function updPreview() {
       if (cl.url) {
         v.src = cl.url;
         v.currentTime = cd.trimStart;
-        v.style.display='block'; em.style.display='none'; ov.style.display='flex'; updOvr();
+        v.style.display='block'; em.style.display='none'; ov.style.display='flex';
+        // Static preview: show hook, hide CTA (CTA reveals during playback only)
+        const _h = document.getElementById('o-hook');
+        const _c = document.getElementById('o-cta');
+        if (_h) _h.style.opacity = '1';
+        if (_c) _c.style.opacity = '0';
+        updOvr();
         return;
       }
       // Clip is referenced but blob not downloaded yet — kick off preload
@@ -2694,17 +2709,51 @@ async function playNext() {
   if (!cd) { playIdx++; playNext(); return; }
   const cl=clips.find(c=>c.id===cd.clipId);
   if (!cl) { playIdx++; playNext(); return; }
-  // If somehow this clip isn't loaded, await it before playing
   if (!cl.url) { try { await preloadClip(cl.id); } catch(e) {} }
   const v=document.getElementById('pvid');
   if (!cl.url) { console.warn('Skipping unloadable clip', cl.name); playIdx++; playNext(); return; }
   v.src=cl.url; v.currentTime=cd.trimStart; v.muted=false;
   try { await v.play(); } catch(e) { console.warn('play() rejected', e); }
   selTmpl.segments.forEach((_,i)=>{ const el=document.getElementById('seg-'+i); if(el) el.style.borderColor=i===playIdx?'var(--primary)':'var(--border)'; });
-  playTimer = setTimeout(()=>{ v.pause(); playIdx++; playNext(); }, (cd.trimEnd-cd.trimStart)*1000);
+
+  // Hook + CTA timing — match the EDL spec the editor will follow:
+  //  • Hook overlay: first 3 seconds of segment 0 only
+  //  • CTA overlay: last 5 seconds of the LAST segment only
+  //  • Watermark: always visible
+  const isFirstSeg = playIdx === 0;
+  const isLastSeg  = playIdx === selTmpl.segments.length - 1;
+  const segDur     = cd.trimEnd - cd.trimStart;
+  const hookEl = document.getElementById('o-hook');
+  const ctaEl  = document.getElementById('o-cta');
+  if (hookEl) hookEl.style.opacity = isFirstSeg ? '1' : '0';
+  if (ctaEl)  ctaEl.style.opacity  = '0';
+  // Reveal CTA in the final 5 seconds of the final segment
+  if (isLastSeg && ctaEl) {
+    const ctaShowAt = Math.max(0, segDur - 5);
+    setTimeout(() => { if (playing && playIdx === selTmpl.segments.length - 1) ctaEl.style.opacity = '1'; }, ctaShowAt * 1000);
+  }
+  // Hide hook after first 3 seconds of segment 0
+  if (isFirstSeg && hookEl) {
+    setTimeout(() => { if (playing) hookEl.style.opacity = '0'; }, Math.min(3, segDur) * 1000);
+  }
+
+  playTimer = setTimeout(()=>{ v.pause(); playIdx++; playNext(); }, segDur * 1000);
 }
 
-function resetPreview() { playing=false; document.getElementById('play-btn').textContent='▶ Play'; clearTimeout(playTimer); playIdx=0; const v=document.getElementById('pvid'); v.pause(); updPreview(); }
+function resetPreview() {
+  playing=false;
+  document.getElementById('play-btn').textContent='▶ Play';
+  clearTimeout(playTimer);
+  playIdx=0;
+  const v=document.getElementById('pvid');
+  v.pause();
+  // Restore default static preview state: hook visible, CTA hidden
+  const hookEl = document.getElementById('o-hook');
+  const ctaEl  = document.getElementById('o-cta');
+  if (hookEl) hookEl.style.opacity = '1';
+  if (ctaEl)  ctaEl.style.opacity = '0';
+  updPreview();
+}
 
 // ═══════════════════════════════════════
 // TABS & UTILS
