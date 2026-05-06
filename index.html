@@ -147,7 +147,18 @@
   .phone .empty .e-icon { font-size: 36px; margin-bottom: 10px; }
   .phone .ovr { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
   .ovr-hook { background: rgba(0,0,0,.65); color: white; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 5px; text-align: center; backdrop-filter: blur(4px); transition: opacity 0.4s ease; }
-  .ovr-cta { background: var(--primary); color: white; font-size: 10px; font-weight: 600; padding: 6px 10px; border-radius: 5px; text-align: center; transition: opacity 0.4s ease; opacity: 0; }
+  .ovr-cta { background: var(--primary); color: white; font-size: 10px; font-weight: 600; padding: 6px 12px; text-align: center; transition: opacity 0.4s ease; opacity: 0; display: inline-block; }
+  /* CTA shape variants */
+  .ovr-cta.shape-pill      { border-radius: 100px; padding: 6px 14px; }
+  .ovr-cta.shape-rectangle { border-radius: 0; padding: 6px 12px; }
+  .ovr-cta.shape-rounded   { border-radius: 6px; padding: 6px 12px; }
+  .ovr-cta.shape-circle    { border-radius: 50%; padding: 12px 14px; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; line-height: 1; font-size: 9px; }
+  /* CTA placement variants — wrapper repositions */
+  .ovr-cta-wrap.pos-bottom-center { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; pointer-events: none; }
+  .ovr-cta-wrap.pos-bottom-left   { position: absolute; bottom: 16px; left: 12px; right: auto; pointer-events: none; }
+  .ovr-cta-wrap.pos-bottom-right  { position: absolute; bottom: 16px; right: 12px; left: auto; pointer-events: none; }
+  .ovr-cta-wrap.pos-top-center    { position: absolute; top: 24px; left: 0; right: 0; text-align: center; pointer-events: none; }
+  .ovr-cta-wrap.pos-center        { position: absolute; top: 50%; left: 0; right: 0; text-align: center; transform: translateY(-50%); pointer-events: none; }
   .ovr-caption {
     position: absolute; bottom: 80px; left: 8px; right: 8px;
     color: white; font-family: 'Inter', sans-serif; font-weight: 700;
@@ -462,6 +473,9 @@
       <button class="drive-btn" id="drive-pull-btn" onclick="pullFromDrive()" disabled>
         📁 Pull from Google Drive
       </button>
+      <button class="drive-btn" id="local-folder-btn" onclick="openLocalFolder()" style="background:var(--bg-elev);border-color:var(--primary);color:var(--primary);">
+        💾 Open Local Folder
+      </button>
       <button class="drive-btn" id="analyze-all-btn" onclick="analyzeAllClips()" style="display:none;background:linear-gradient(135deg,var(--primary),var(--primary-dark));border-color:var(--primary);font-weight:600;">
         🤖 Analyze All Clips
       </button>
@@ -500,10 +514,10 @@
         <div class="ovr" id="ovr" style="display:none">
           <div class="ovr-hook" id="o-hook">Hook text</div>
           <div class="ovr-caption" id="o-caption" style="display:none"></div>
-          <div>
-            <div class="ovr-wm" style="display:none;"></div>
-            <div class="ovr-cta" id="o-cta"></div>
+          <div class="ovr-cta-wrap pos-bottom-center" id="o-cta-wrap">
+            <div class="ovr-cta shape-pill" id="o-cta"></div>
           </div>
+          <div class="ovr-wm" style="display:none;"></div>
         </div>
       </div>
       <div class="controls">
@@ -602,6 +616,8 @@ const DEFAULT_BRAND = {
   captionPosition: 'lower-third',  // lower-third | top-bar | center
   captionBackdrop: 'shadow',       // shadow | bar | none
   hookTone: 'storyteller',         // storyteller | question | promotional | zen
+  ctaShape: 'pill',                // pill | rectangle | rounded | circle
+  ctaPosition: 'bottom-center',    // bottom-center | bottom-left | bottom-right | top-center | center
   // Path B taxonomy — per-client trade-specific job categories. AI classifies
   // each clip into one of these. Free-form newline-separated; UI shows as a
   // textarea in the brand panel. Editor can edit at any time.
@@ -788,15 +804,17 @@ function saveClientData(clientId) {
     // Strip large/transient fields before saving (blob URLs don't survive reloads)
     const slimClips = clips.map(c => ({
       id: c.id, name: c.name, driveId: c.driveId, streamUrl: c.streamUrl,
+      source: c.source || (c.driveId ? 'drive' : null),
       thumbnail: c.thumbnail, size: c.size, sizeMB: c.sizeMB, mimeType: c.mimeType,
       createdTime: c.createdTime, duration: c.duration, tags: c.tags,
       aiAnalysis: c.aiAnalysis,
-      transcript: c.transcript, // Whisper transcripts persist too
-      // story metadata also persisted (clusterId etc. stays on clip object)
+      transcript: c.transcript,
       clusterId: c.clusterId, storyTitle: c.storyTitle,
       storyDescription: c.storyDescription, storyArc: c.storyArc,
       storyColor: c.storyColor, storyMood: c.storyMood,
       storyJobCategory: c.storyJobCategory,
+      // fileHandle is intentionally omitted — File System handles can't be JSON-serialized.
+      // User re-grants folder access via "Open Local Folder" button each session.
     }));
     const slimQueue = queue.map(q => ({
       day: q.day, title: q.title, pillar: q.pillar, tmpl: q.tmpl,
@@ -981,6 +999,17 @@ function applyClientBrand() {
     ovr.classList.remove('back-shadow','back-bar','back-none');
     ovr.classList.add('back-' + BRAND.captionBackdrop);
   }
+  // CTA shape + position
+  const ctaEl = document.getElementById('o-cta');
+  const ctaWrap = document.getElementById('o-cta-wrap');
+  if (ctaEl) {
+    ctaEl.classList.remove('shape-pill','shape-rectangle','shape-rounded','shape-circle');
+    ctaEl.classList.add('shape-' + (BRAND.ctaShape || 'pill'));
+  }
+  if (ctaWrap) {
+    ctaWrap.classList.remove('pos-bottom-center','pos-bottom-left','pos-bottom-right','pos-top-center','pos-center');
+    ctaWrap.classList.add('pos-' + (BRAND.ctaPosition || 'bottom-center'));
+  }
   // Update header brand name + switcher selection
   renderClientSwitcher();
 }
@@ -1139,6 +1168,128 @@ function launchApp() {
 // ═══════════════════════════════════════
 // GOOGLE DRIVE
 // ═══════════════════════════════════════
+// ── LOCAL FOLDER INGESTION ──────────────────────────────
+// Uses the File System Access API to read videos directly from a user-chosen
+// folder on disk (typically a OneDrive/Dropbox/iCloud sync folder, or any
+// downloaded export). Bypasses Drive entirely — no OAuth, no tokens, no API
+// rate limits. Per-session permission grant; user must click the button each
+// session, but no popup-blocker issues since it's an explicit user gesture.
+
+async function openLocalFolder() {
+  if (!('showDirectoryPicker' in window)) {
+    alert('Your browser does not support local folder access. Use Chrome, Edge, or another Chromium-based browser.');
+    return;
+  }
+  const btn = document.getElementById('local-folder-btn');
+  btn.textContent = '⏳ Opening folder picker…';
+  btn.disabled = true;
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: 'read', id: 'spvs-local-folder' });
+  } catch (e) {
+    btn.textContent = '💾 Open Local Folder';
+    btn.disabled = false;
+    if (e.name !== 'AbortError') alert('Failed to open folder: ' + (e.message || e));
+    return;
+  }
+
+  btn.textContent = '⏳ Scanning for videos…';
+
+  // Collect all .mp4 / .mov / .m4v / .webm entries, recurse one level into subfolders
+  async function* iterateVideos(handle, depth = 0) {
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'file') {
+        const name = entry.name;
+        if (/\.(mp4|mov|m4v|webm)$/i.test(name)) yield entry;
+      } else if (entry.kind === 'directory' && depth < 3) {
+        yield* iterateVideos(entry, depth + 1);
+      }
+    }
+  }
+
+  const fileEntries = [];
+  try {
+    for await (const e of iterateVideos(dirHandle)) fileEntries.push(e);
+  } catch (e) {
+    btn.textContent = '⚠️  Read error: ' + (e.message || e).substring(0, 30);
+    setTimeout(() => { btn.textContent = '💾 Open Local Folder'; btn.disabled = false; }, 4000);
+    return;
+  }
+
+  if (!fileEntries.length) {
+    btn.textContent = '⚠️  No videos found in folder';
+    setTimeout(() => { btn.textContent = '💾 Open Local Folder'; btn.disabled = false; }, 4000);
+    return;
+  }
+
+  // Index existing clips by name to dedup — local-source clips don't have Drive IDs
+  const existingByName = new Map();
+  clips.forEach(c => { if (c.name) existingByName.set(c.name, c); });
+
+  let added = 0, refreshed = 0;
+  for (let i = 0; i < fileEntries.length; i++) {
+    const entry = fileEntries[i];
+    btn.textContent = `⏳ Indexing ${i+1}/${fileEntries.length}: ${entry.name.substring(0,28)}`;
+    let file;
+    try { file = await entry.getFile(); } catch (e) {
+      console.warn('Could not read', entry.name, e);
+      continue;
+    }
+    const sizeMB = (file.size / (1024*1024)).toFixed(1);
+
+    const existing = existingByName.get(entry.name);
+    if (existing) {
+      existing.source = 'local';
+      existing.fileHandle = entry;
+      existing.size = file.size;
+      existing.sizeMB = sizeMB;
+      existing.mimeType = file.type || 'video/mp4';
+      existing.url = null; // will be created on demand
+      existing.loaded = false;
+      existing.accessToken = null; // not needed for local
+      refreshed++;
+    } else {
+      const clip = {
+        id: 'cl-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 5),
+        name: entry.name,
+        source: 'local',
+        fileHandle: entry,
+        size: file.size,
+        sizeMB,
+        mimeType: file.type || 'video/mp4',
+        createdTime: new Date(file.lastModified).toISOString(),
+        thumbnail: null,
+        duration: 0,
+        tags: guessTagsFromName(entry.name),
+        aiAnalysis: null,
+        loaded: false,
+      };
+      clips.push(clip);
+      added++;
+    }
+  }
+
+  // Stamp library age
+  const c = getActiveClient();
+  if (c) {
+    c.brand = c.brand || {};
+    c.brand.lastPullAt = new Date().toISOString();
+    c.brand.lastPullCount = fileEntries.length;
+    c.brand.ingestionSource = 'local';
+    saveClients();
+  }
+
+  renderClips();
+  updateStats();
+  if (activeClientId) saveClientData(activeClientId);
+
+  btn.textContent = added === 0
+    ? `✓ ${refreshed} clips refreshed from local folder`
+    : `✓ ${added} new clip${added===1?'':'s'} added (${refreshed} kept)`;
+  btn.disabled = false;
+  setTimeout(() => { btn.textContent = '💾 Open Local Folder'; }, 4000);
+}
+
 async function pullFromDrive() {
   if (!CONFIG.gapi.connected) {
     alert('Connect Google Drive in Setup first.');
@@ -1347,6 +1498,30 @@ function selectClip(clipId) {
 async function preloadClip(clipId) {
   const clip = clips.find(c => c.id === clipId);
   if (!clip || clip.loaded || clip.url) return; // already loaded
+
+  // Local-folder source: read directly from the FileSystemFileHandle
+  if (clip.source === 'local' && clip.fileHandle) {
+    const card = document.getElementById(clipId);
+    if (card) card.style.opacity = '0.5';
+    try {
+      const file = await clip.fileHandle.getFile();
+      clip.url = URL.createObjectURL(file);
+      clip.loaded = true;
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.src = clip.url;
+      await new Promise(r => { v.onloadedmetadata = r; v.onerror = r; });
+      if (v.duration && isFinite(v.duration)) clip.duration = v.duration;
+      if (CONFIG.ai.enabled && !clip.aiAnalysis) analyzeClipAI(clip);
+      renderClips();
+      updateStats();
+    } catch (e) {
+      console.warn(`Failed to read local file ${clip.name}:`, e);
+      if (card) card.style.opacity = '1';
+    }
+    return;
+  }
+
   if (!clip.streamUrl || !clip.accessToken) return; // not a Drive clip
 
   // Show loading state
@@ -1802,6 +1977,45 @@ function renderTL() {
   if (typeof renderScrubber === 'function') renderScrubber();
 }
 
+// Bulk retag: every clip currently classified as 'Unclassified' is moved into
+// the user's chosen category. Used when a new category (e.g. 'Context / B-roll')
+// is added AFTER analysis has already run.
+function bulkRetagUnclassified(targetCategory) {
+  if (!targetCategory) return 0;
+  const cats = clientJobCategories();
+  if (!cats.includes(targetCategory)) {
+    alert(`"${targetCategory}" is not in the active client's job categories. Add it first in the Brand panel.`);
+    return 0;
+  }
+  let n = 0;
+  clips.forEach(c => {
+    if (c.aiAnalysis && (c.aiAnalysis.jobCategory === 'Unclassified' || !c.aiAnalysis.jobCategory)) {
+      c.aiAnalysis.jobCategory = targetCategory;
+      // Also reset clip-level tags so the new category shows up
+      c.tags = [targetCategory];
+      if (c.aiAnalysis.clipRole) c.tags.push(c.aiAnalysis.clipRole);
+      if (c.aiAnalysis.mood) c.tags.push(c.aiAnalysis.mood);
+      n++;
+    }
+  });
+  if (n > 0 && activeClientId) saveClientData(activeClientId);
+  renderClips();
+  return n;
+}
+
+// Convenience wrapper — find the best Context-like category in the client's list
+function retagUnclassifiedAsContext() {
+  const cats = clientJobCategories();
+  // Find a category that LOOKS like a context/B-roll bucket
+  const ctxLike = cats.find(c => /context|b.?roll|general|misc|other/i.test(c));
+  if (!ctxLike) {
+    alert('Add a "Context / B-roll" category in the Brand panel first, then click this again.');
+    return;
+  }
+  const n = bulkRetagUnclassified(ctxLike);
+  alert(`Re-tagged ${n} clip${n === 1 ? '' : 's'} as "${ctxLike}".`);
+}
+
 // Returns count of clips with no AI analysis yet — used to label the Analyze button
 function unanalyzedCount() {
   return clips.filter(c => !c.aiAnalysis).length;
@@ -1865,6 +2079,10 @@ function renderClips() {
     <div>${Object.entries(tc).map(([t,n])=>`<span class="ai-pill" style="background:${categoryColor(t)}33;color:${categoryColor(t)}">${escapeHtml(t)}: ${n}</span>`).join('')}</div>
     ${CONFIG.ai.enabled ? `<div style="margin-top:6px;"><div class="ai-bar" style="background:linear-gradient(90deg,var(--green) ${analyzed/clips.length*100}%,var(--border) ${analyzed/clips.length*100}%)"></div><div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${analyzed}/${clips.length} clips analyzed by AI</div></div>` : ''}
     <div class="ai-suggestion"><strong>Suggestion:</strong> You have enough footage for ${Object.keys(tc).length} content pillars. ${clips.length>=7?'Ready to start assembling videos!':'Upload more clips to fill the month.'}</div>
+    ${(tc['Unclassified'] || 0) > 0 ? `
+    <button onclick="retagUnclassifiedAsContext()" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--primary);padding:5px 8px;border-radius:4px;font-size:10px;cursor:pointer;margin-top:8px;width:100%;">
+      🏷 Re-tag ${tc['Unclassified']} unclassified as Context / B-roll
+    </button>` : ''}
   </div>`;
 
   updateAnalyzeAllButton();
@@ -1977,16 +2195,81 @@ function clearTL() { segClips={}; renderTL(); updPreview(); }
 // (c) draft styled captions in the brand voice for editor handoff.
 // Cost: ~$0.006 per minute of audio. A 36-clip library averaging 30s = ~$0.10.
 
+// Whisper has a hard 25 MB upload cap. Big video files need their audio
+// extracted (and re-encoded at low bitrate) before transcription. We use the
+// MediaRecorder API + captureStream to record audio-only at 4x speed.
+const WHISPER_MAX_BYTES = 24 * 1024 * 1024; // 24 MB safety margin under 25 MB cap
+
+async function extractAudioBlob(videoBlob) {
+  const url = URL.createObjectURL(videoBlob);
+  const video = document.createElement('video');
+  video.src = url;
+  video.muted = true;            // user doesn't hear it
+  video.playsInline = true;
+  video.crossOrigin = 'anonymous';
+  await new Promise((res, rej) => {
+    video.onloadedmetadata = res;
+    video.onerror = () => rej(new Error('Could not load video for audio extraction'));
+  });
+  // Try to play 4x faster — falls back to 1x silently if browser disallows
+  try { video.playbackRate = 4.0; } catch(e) {}
+
+  const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  const audioTracks = stream.getAudioTracks();
+  if (!audioTracks.length) {
+    URL.revokeObjectURL(url);
+    throw new Error('Video has no audio track');
+  }
+  const audioStream = new MediaStream(audioTracks);
+
+  // Choose the smallest reliably-supported audio container
+  let mime = 'audio/webm;codecs=opus';
+  if (!MediaRecorder.isTypeSupported(mime)) {
+    mime = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+  }
+  const recorder = new MediaRecorder(audioStream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onerror = e => { URL.revokeObjectURL(url); reject(e.error || new Error('MediaRecorder error')); };
+    recorder.onstop = () => {
+      URL.revokeObjectURL(url);
+      const out = new Blob(chunks, { type: mime || 'audio/webm' });
+      resolve(out);
+    };
+    video.onended = () => recorder.stop();
+    // Safety stop in case onended doesn't fire
+    const safetyMs = Math.min(120000, (video.duration / Math.max(0.1, video.playbackRate || 1)) * 1000 + 2000);
+    setTimeout(() => { try { recorder.stop(); } catch(e) {} }, safetyMs);
+    recorder.start(500);
+    video.play().catch(reject);
+  });
+}
+
 async function transcribeClip(clip) {
   if (!CONFIG.ai.enabled || CONFIG.ai.provider !== 'openai') {
     throw new Error('Whisper transcription requires OpenAI provider with API key');
   }
   if (!clip.url) throw new Error('Clip blob not loaded — preload first');
 
-  // Fetch the blob and post as multipart/form-data
-  const blob = await fetch(clip.url).then(r => r.blob());
+  // Fetch the video blob — re-encode to audio-only if it's over Whisper's limit.
+  let blob = await fetch(clip.url).then(r => r.blob());
+  let filename = clip.name || 'clip.mp4';
+  if (blob.size > WHISPER_MAX_BYTES) {
+    try {
+      const audio = await extractAudioBlob(blob);
+      blob = audio;
+      const ext = (audio.type.includes('webm') ? 'webm' : (audio.type.includes('mp4') ? 'm4a' : 'webm'));
+      filename = (clip.name || 'clip').replace(/\.[^.]+$/, '') + '.' + ext;
+      console.log(`Audio-extracted "${clip.name}" → ${(audio.size/1024).toFixed(1)} KB`);
+    } catch (e) {
+      throw new Error(`Audio extraction failed for ${clip.name}: ${e.message || e}`);
+    }
+  }
+
   const fd = new FormData();
-  fd.append('file', blob, clip.name || 'clip.mp4');
+  fd.append('file', blob, filename);
   fd.append('model', 'whisper-1');
   fd.append('response_format', 'verbose_json');
   fd.append('timestamp_granularities[]', 'word');
@@ -2060,13 +2343,19 @@ async function transcribeAllClips() {
     done++;
     btn.textContent = `📝 Transcribing ${done}/${todo.length}: ${clip.name.substring(0,22)}…`;
     try {
-      // Make sure the clip blob is downloaded
-      if (!clip.loaded && clip.streamUrl && clip.accessToken) {
-        const r = await fetch(clip.streamUrl, { headers: { Authorization: `Bearer ${clip.accessToken}` } });
-        if (!r.ok) throw new Error(`HTTP ${r.status} fetching blob`);
-        const b = await r.blob();
-        clip.url = URL.createObjectURL(b);
-        clip.loaded = true;
+      // Ensure the clip blob is loaded (works for both Drive and local sources)
+      if (!clip.loaded || !clip.url) {
+        if (clip.source === 'local' && clip.fileHandle) {
+          const file = await clip.fileHandle.getFile();
+          clip.url = URL.createObjectURL(file);
+          clip.loaded = true;
+        } else if (clip.streamUrl && clip.accessToken) {
+          const r = await fetch(clip.streamUrl, { headers: { Authorization: `Bearer ${clip.accessToken}` } });
+          if (!r.ok) throw new Error(`HTTP ${r.status} fetching blob`);
+          const b = await r.blob();
+          clip.url = URL.createObjectURL(b);
+          clip.loaded = true;
+        }
       }
       const tx = await transcribeClip(clip);
       if (tx.text && tx.text.length > 5) hasSpeech++;
@@ -2331,15 +2620,21 @@ async function analyzeAllClips() {
     done++;
     btn.textContent = `🤖 Analyzing ${done}/${todo.length}: ${clip.name.substring(0, 22)}…`;
     try {
-      // Load the video blob if it's still metadata-only
-      if (!clip.loaded && clip.streamUrl && clip.accessToken) {
-        const resp = await fetch(clip.streamUrl, {
-          headers: { Authorization: `Bearer ${clip.accessToken}` }
-        });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const blob = await resp.blob();
-        clip.url = URL.createObjectURL(blob);
-        clip.loaded = true;
+      // Load the video blob if it's still metadata-only — supports both sources
+      if (!clip.loaded || !clip.url) {
+        if (clip.source === 'local' && clip.fileHandle) {
+          const file = await clip.fileHandle.getFile();
+          clip.url = URL.createObjectURL(file);
+          clip.loaded = true;
+        } else if (clip.streamUrl && clip.accessToken) {
+          const resp = await fetch(clip.streamUrl, {
+            headers: { Authorization: `Bearer ${clip.accessToken}` }
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          clip.url = URL.createObjectURL(blob);
+          clip.loaded = true;
+        }
         const v = document.createElement('video');
         v.preload = 'metadata';
         v.src = clip.url;
@@ -2759,6 +3054,65 @@ function preferredMoodForSegment(segName) {
   return ['professional','satisfying','educational','dramatic','wholesome','funny','gross-but-satisfying'];
 }
 
+// AI-driven within-story ordering pass. Given a story's chosen clips and the
+// template segments, ask GPT-4o-mini to order the clips for the cleanest
+// spoken/narrative flow. Cheap (~$0.0007 per call). Skipped silently if no AI,
+// no transcripts, or fewer than 3 clips.
+async function orderClipsByContinuity(chosenClips, tmpl) {
+  if (!CONFIG.ai.enabled || CONFIG.ai.provider !== 'openai') return chosenClips;
+  if (chosenClips.length < 3) return chosenClips;
+  const haveTranscripts = chosenClips.some(c => c.transcript?.text);
+  if (!haveTranscripts) return chosenClips;
+
+  const summary = chosenClips.map((c, i) => ({
+    idx: i,
+    title: c.aiAnalysis?.suggested_clip_title || c.name?.substring(0,30),
+    role: c.aiAnalysis?.clipRole || null,
+    spoken: (c.transcript?.text || '').substring(0, 240),
+  }));
+
+  const prompt = `You are sequencing clips for a short-form video. Given these ${chosenClips.length} clips and the template segment order (${tmpl.segments.map(s=>s.name).join(' → ')}), return the SORTED order indices for narrative-best flow.
+
+Goals:
+- Match the segment arc (problem → process → result where applicable)
+- The end of one clip's spoken content should lead naturally into the start of the next
+- Question setups should be followed by answers, not random visuals
+
+CLIPS:
+${JSON.stringify(summary, null, 1)}
+
+Return ONLY a JSON object: {"order": [<idx>, <idx>, ...]} where the array is exactly the same indices in the new sequence. No commentary.`;
+
+  try {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200,
+        response_format: { type: 'json_object' },
+        temperature: 0.3,
+      })
+    });
+    const data = await resp.json();
+    const result = JSON.parse(data.choices[0].message.content);
+    if (!Array.isArray(result.order)) return chosenClips;
+    // Validate: must contain each index exactly once
+    const allIndices = new Set(chosenClips.map((_,i) => i));
+    const seen = new Set();
+    for (const idx of result.order) {
+      if (!allIndices.has(idx) || seen.has(idx)) return chosenClips;
+      seen.add(idx);
+    }
+    if (seen.size !== chosenClips.length) return chosenClips;
+    return result.order.map(i => chosenClips[i]);
+  } catch (e) {
+    console.warn('Ordering pass failed, falling back:', e);
+    return chosenClips;
+  }
+}
+
 function fillSlotAuto(slotIdx, sharedUsed) {
   const q = queue[slotIdx];
   const tmpl = TEMPLATES.find(t => t.id === (q.tmplUsed || q.tmpl));
@@ -2919,12 +3273,43 @@ async function generateAllQueue() {
     await new Promise(r => setTimeout(r, 30));
   }
 
+  // AI ordering pass — re-sequence clips within each just-filled slot for narrative flow.
+  // Cheap: ~$0.0007 per slot via gpt-4o-mini. Silent if no transcripts.
+  let orderedCount = 0;
+  for (const { i } of empty) {
+    const q = queue[i];
+    if (!q.segs || Object.keys(q.segs).length < 3) continue;
+    const tmpl = TEMPLATES.find(t => t.id === (q.tmplUsed || q.tmpl));
+    if (!tmpl) continue;
+    const segIndices = Object.keys(q.segs).map(Number).sort((a,b)=>a-b);
+    const orderedClips = segIndices.map(si => clips.find(c => c.id === q.segs[si].clipId)).filter(Boolean);
+    if (orderedClips.length < 3) continue;
+    btn.textContent = `🧠 Re-ordering slot ${i+1}/30 for narrative flow…`;
+    const newOrder = await orderClipsByContinuity(orderedClips, tmpl);
+    if (newOrder.length === orderedClips.length) {
+      const newSegs = {};
+      segIndices.forEach((si, idx) => {
+        const cl = newOrder[idx];
+        const orig = q.segs[si];
+        // Find original entry that corresponds to this clip to preserve trim
+        const match = orderedClips.find(c => c.id === cl.id);
+        const matchIdx = orderedClips.indexOf(match);
+        const sourceTrim = q.segs[segIndices[matchIdx]];
+        newSegs[si] = sourceTrim ? { ...sourceTrim, clipId: cl.id } : { clipId: cl.id, trimStart: 0, trimEnd: tmpl.segments[si].dur };
+      });
+      q.segs = newSegs;
+      orderedCount++;
+    }
+  }
+
   saveQueueState();
   renderQueue();
   updateStats();
   btn.disabled = false;
-  btn.textContent = `✓ Filled ${filled} slot${filled === 1 ? '' : 's'}`;
-  setTimeout(() => { btn.textContent = '🤖 GENERATE ALL EMPTY SLOTS'; }, 3500);
+  btn.textContent = orderedCount > 0
+    ? `✓ Filled ${filled} slot${filled === 1 ? '' : 's'} (${orderedCount} re-ordered)`
+    : `✓ Filled ${filled} slot${filled === 1 ? '' : 's'}`;
+  setTimeout(() => { btn.textContent = '🤖 GENERATE ALL EMPTY SLOTS'; }, 4000);
 }
 
 // ─── SAVE TO QUEUE (manual) ─────────────────────────────
@@ -3060,27 +3445,37 @@ async function playNext() {
     setTimeout(() => { if (playing) hookEl.style.opacity = '0'; }, Math.min(3, segDur) * 1000);
   }
 
-  // Live captions + scrubber tracking via timeupdate
+  // Live captions + scrubber tracking — use both timeupdate AND a 100ms interval
+  // for smoother updates (timeupdate can fire as rarely as 4x/sec depending on browser).
   const captionEl = document.getElementById('o-caption');
-  if (captionEl) captionEl.style.display = 'block';
-  const onTimeUpdate = () => {
+  if (captionEl) {
+    captionEl.style.display = 'block';
+    captionEl.textContent = ''; // clear stale words from previous segment
+  }
+  const refreshCaptions = () => {
     const tInClip = v.currentTime;
     if (cl.transcript?.words?.length && captionEl) {
       const active = [];
       const lookback = Math.max(0, tInClip - 0.5);
       for (const w of cl.transcript.words) {
         if (w.e >= lookback && w.s <= tInClip + 0.05) active.push(w.w.trim());
-        if (w.s > tInClip + 0.1) break;
+        if (w.s > tInClip + 0.2) break;
       }
       captionEl.textContent = active.slice(-3).join(' ');
+    } else if (captionEl) {
+      captionEl.textContent = ''; // no transcript on this clip → clear
     }
     updateScrubber(tInClip);
   };
-  v.addEventListener('timeupdate', onTimeUpdate);
+  // Run once immediately, then on every timeupdate AND every 100ms (belt and suspenders)
+  refreshCaptions();
+  v.addEventListener('timeupdate', refreshCaptions);
+  const captionInterval = setInterval(refreshCaptions, 250);
   playTimer = setTimeout(() => {
     v.pause();
-    v.removeEventListener('timeupdate', onTimeUpdate);
-    if (captionEl && playIdx >= selTmpl.segments.length - 1) captionEl.textContent = '';
+    v.removeEventListener('timeupdate', refreshCaptions);
+    clearInterval(captionInterval);
+    if (captionEl) captionEl.textContent = ''; // clear between segments + at the end
     playIdx++;
     playNext();
   }, segDur * 1000);
@@ -3354,6 +3749,25 @@ function renderBrandForm() {
         </select>
       </div>
       <div class="brand-form-row">
+        <label>CTA Shape</label>
+        <select id="bf-cta-shape">
+          <option value="pill"      ${b.ctaShape==='pill'?'selected':''}>Pill (rounded)</option>
+          <option value="rectangle" ${b.ctaShape==='rectangle'?'selected':''}>Rectangle (sharp)</option>
+          <option value="rounded"   ${b.ctaShape==='rounded'?'selected':''}>Rounded square</option>
+          <option value="circle"    ${b.ctaShape==='circle'?'selected':''}>Circle / badge</option>
+        </select>
+      </div>
+      <div class="brand-form-row">
+        <label>CTA Position</label>
+        <select id="bf-cta-position">
+          <option value="bottom-center" ${b.ctaPosition==='bottom-center'?'selected':''}>Bottom center</option>
+          <option value="bottom-left"   ${b.ctaPosition==='bottom-left'?'selected':''}>Bottom left</option>
+          <option value="bottom-right"  ${b.ctaPosition==='bottom-right'?'selected':''}>Bottom right</option>
+          <option value="top-center"    ${b.ctaPosition==='top-center'?'selected':''}>Top center</option>
+          <option value="center"        ${b.ctaPosition==='center'?'selected':''}>Center</option>
+        </select>
+      </div>
+      <div class="brand-form-row">
         <label>Caption Backdrop</label>
         <select id="bf-caption-backdrop">
           <option value="shadow" ${b.captionBackdrop==='shadow'?'selected':''}>Drop Shadow Only (cinematic)</option>
@@ -3479,6 +3893,8 @@ function saveBrandForm() {
   c.brand.hookTone      = get('bf-hook-tone');
   c.brand.captionPosition = get('bf-caption-position');
   c.brand.captionBackdrop = get('bf-caption-backdrop');
+  c.brand.ctaShape    = get('bf-cta-shape')    || 'pill';
+  c.brand.ctaPosition = get('bf-cta-position') || 'bottom-center';
   c.brand.defaultCTA    = get('bf-cta') || '';
   c.brand.hashtags      = get('bf-hashtags') || '';
   c.brand.jobCategories = get('bf-job-categories') || '';
