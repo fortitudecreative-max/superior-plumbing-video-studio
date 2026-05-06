@@ -148,7 +148,8 @@
   .phone .ovr { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
   .ovr-hook { background: rgba(0,0,0,.65); color: white; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 5px; text-align: center; backdrop-filter: blur(4px); transition: opacity 0.4s ease; }
   .ovr-cta { background: var(--primary); color: white; font-size: 10px; font-weight: 600; padding: 6px 10px; border-radius: 5px; text-align: center; transition: opacity 0.4s ease; opacity: 0; }
-  .ovr-wm { position: absolute; bottom: 32px; right: 10px; color: rgba(255,255,255,.4); font-size: 7px; font-weight: 700; letter-spacing: 0.5px; }
+  .ovr-wm { position: absolute; bottom: 32px; right: 10px; color: rgba(255,255,255,.4); font-size: 7px; font-weight: 700; letter-spacing: 0.5px; min-width: 60px; min-height: 24px; display: flex; align-items: flex-end; justify-content: flex-end; pointer-events: none; }
+  .ovr-wm img { display: block; max-height: 32px; max-width: 80px; height: auto; width: auto; object-fit: contain; opacity: 0.85; }
   .controls { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
   .ctrl-btn { background: var(--bg-card); border: 1px solid var(--border); color: white; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
   .ctrl-btn:hover { background: var(--primary); border-color: var(--primary); }
@@ -448,6 +449,9 @@
       </button>
       <button class="drive-btn" id="cluster-btn" onclick="clusterClips()" style="display:none;background:var(--bg-elev);border-color:var(--primary);color:var(--primary);font-weight:600;">
         🧩 Find Stories
+      </button>
+      <button class="drive-btn" id="transcribe-btn" onclick="transcribeAllClips()" style="display:none;background:var(--bg-elev);border-color:var(--primary);color:var(--primary);font-weight:600;">
+        📝 Transcribe All
       </button>
       <div id="stories-panel" style="display:none;margin-bottom:10px;"></div>
       <div class="upload-zone" id="uzone">
@@ -755,7 +759,13 @@ function saveClientData(clientId) {
       id: c.id, name: c.name, driveId: c.driveId, streamUrl: c.streamUrl,
       thumbnail: c.thumbnail, size: c.size, sizeMB: c.sizeMB, mimeType: c.mimeType,
       createdTime: c.createdTime, duration: c.duration, tags: c.tags,
-      aiAnalysis: c.aiAnalysis, // keep AI analysis — it's gold
+      aiAnalysis: c.aiAnalysis,
+      transcript: c.transcript, // Whisper transcripts persist too
+      // story metadata also persisted (clusterId etc. stays on clip object)
+      clusterId: c.clusterId, storyTitle: c.storyTitle,
+      storyDescription: c.storyDescription, storyArc: c.storyArc,
+      storyColor: c.storyColor, storyMood: c.storyMood,
+      storyJobCategory: c.storyJobCategory,
     }));
     const slimQueue = queue.map(q => ({
       day: q.day, title: q.title, pillar: q.pillar, tmpl: q.tmpl,
@@ -907,6 +917,8 @@ function updateConnBadges() {
   if (aAll)  aAll.style.display  = CONFIG.ai.enabled ? 'block'        : 'none';
   const cBtn = document.getElementById('cluster-btn');
   if (cBtn) cBtn.style.display = CONFIG.ai.enabled ? 'block' : 'none';
+  const tBtn = document.getElementById('transcribe-btn');
+  if (tBtn) tBtn.style.display = CONFIG.ai.enabled ? 'block' : 'none';
 }
 
 // ── Apply client's brand to live CSS variables, watermark, etc. ──
@@ -1872,6 +1884,158 @@ function setTrim(i,type,val) {
 function clearTL() { segClips={}; renderTL(); updPreview(); }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ─── WHISPER TRANSCRIPTION ──────────────────────────────────
+// Every clip gets sent to OpenAI Whisper with timestamp_granularities=word.
+// We store the transcript + word-level timestamps on the clip so we can
+// (a) snap trim points to sentence boundaries, (b) cluster by topic continuity,
+// (c) draft styled captions in the brand voice for editor handoff.
+// Cost: ~$0.006 per minute of audio. A 36-clip library averaging 30s = ~$0.10.
+
+async function transcribeClip(clip) {
+  if (!CONFIG.ai.enabled || CONFIG.ai.provider !== 'openai') {
+    throw new Error('Whisper transcription requires OpenAI provider with API key');
+  }
+  if (!clip.url) throw new Error('Clip blob not loaded — preload first');
+
+  // Fetch the blob and post as multipart/form-data
+  const blob = await fetch(clip.url).then(r => r.blob());
+  const fd = new FormData();
+  fd.append('file', blob, clip.name || 'clip.mp4');
+  fd.append('model', 'whisper-1');
+  fd.append('response_format', 'verbose_json');
+  fd.append('timestamp_granularities[]', 'word');
+
+  const resp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${CONFIG.ai.key}` },
+    body: fd,
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Whisper ${resp.status}: ${errText.substring(0,200)}`);
+  }
+  const data = await resp.json();
+
+  // Build transcript record + sentence boundaries
+  const words = (data.words || []).map(w => ({ w: w.word, s: w.start, e: w.end }));
+  const fullText = (data.text || '').trim();
+  const language = data.language || 'en';
+  const duration = data.duration || clip.duration || 0;
+
+  // Heuristic sentence-boundary detection from word timestamps:
+  //  • a word ending in . / ! / ? marks the end of a sentence
+  //  • OR a gap of >0.5s between adjacent words counts as a pause boundary
+  // We store the seconds at which it's "safe" to cut.
+  const boundaries = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const nextWord = words[i + 1];
+    const endsSentence = /[.!?]$/.test(word.w?.trim() || '');
+    const gapAfter = nextWord ? (nextWord.s - word.e) : 0;
+    if (endsSentence || gapAfter > 0.5) {
+      boundaries.push(word.e);
+    }
+  }
+  // Also add 0 and duration as natural boundaries
+  if (!boundaries.includes(0)) boundaries.unshift(0);
+  if (duration && !boundaries.includes(duration)) boundaries.push(duration);
+  boundaries.sort((a, b) => a - b);
+
+  clip.transcript = {
+    text: fullText,
+    words,
+    boundaries,
+    language,
+    duration,
+    transcribedAt: new Date().toISOString(),
+  };
+  return clip.transcript;
+}
+
+async function transcribeAllClips() {
+  if (!CONFIG.ai.enabled) { alert('Turn on AI in Setup first.'); return; }
+  if (CONFIG.ai.provider !== 'openai') {
+    alert('Whisper transcription currently requires OpenAI provider.');
+    return;
+  }
+  if (!clips.length) { alert('Pull clips from Google Drive first.'); return; }
+
+  const btn = document.getElementById('transcribe-btn');
+  const todo = clips.filter(c => !c.transcript);
+  if (!todo.length) {
+    btn.textContent = '✓ All clips transcribed';
+    setTimeout(() => updateTranscribeButton(), 2500);
+    return;
+  }
+
+  btn.disabled = true;
+  let done = 0, failed = 0, hasSpeech = 0;
+  for (const clip of todo) {
+    done++;
+    btn.textContent = `📝 Transcribing ${done}/${todo.length}: ${clip.name.substring(0,22)}…`;
+    try {
+      // Make sure the clip blob is downloaded
+      if (!clip.loaded && clip.streamUrl && clip.accessToken) {
+        const r = await fetch(clip.streamUrl, { headers: { Authorization: `Bearer ${clip.accessToken}` } });
+        if (!r.ok) throw new Error(`HTTP ${r.status} fetching blob`);
+        const b = await r.blob();
+        clip.url = URL.createObjectURL(b);
+        clip.loaded = true;
+      }
+      const tx = await transcribeClip(clip);
+      if (tx.text && tx.text.length > 5) hasSpeech++;
+    } catch (e) {
+      console.warn('Transcription failed for', clip.name, e);
+      failed++;
+    }
+    if (activeClientId) saveClientData(activeClientId);
+  }
+  // Stamp library age
+  const c = getActiveClient();
+  if (c) { c.brand.lastTranscribeAt = new Date().toISOString(); saveClients(); }
+
+  btn.disabled = false;
+  btn.textContent = failed
+    ? `⚠️  Done — ${todo.length - failed}/${todo.length} transcribed (${failed} failed)`
+    : `✓ Transcribed all ${todo.length} clips (${hasSpeech} with speech)`;
+  setTimeout(() => updateTranscribeButton(), 4000);
+  renderClips();
+}
+
+function updateTranscribeButton() {
+  const btn = document.getElementById('transcribe-btn');
+  if (!btn || btn.disabled) return;
+  if (!CONFIG.ai.enabled) return;
+  const todo = clips.filter(c => !c.transcript).length;
+  if (todo === 0 && clips.length > 0) {
+    btn.textContent = '✓ All clips transcribed';
+  } else if (todo > 0) {
+    btn.textContent = `📝 Transcribe ${todo} new clip${todo===1?'':'s'}`;
+  } else {
+    btn.textContent = '📝 Transcribe All';
+  }
+}
+
+// ─── SENTENCE-BOUNDARY-AWARE TRIM SNAPPING ──────────────
+// Given a proposed second-mark, return the nearest "safe cut" — i.e. a
+// sentence boundary in the clip's transcript — within a tolerance window.
+// Falls back to the proposed value if no transcript or no nearby boundary.
+function snapToSentenceBoundary(clip, secondMark, toleranceSeconds) {
+  if (toleranceSeconds == null) toleranceSeconds = 2;
+  const bounds = clip.transcript?.boundaries;
+  if (!bounds || !bounds.length) return secondMark;
+  // Find nearest boundary
+  let best = secondMark;
+  let bestDist = Infinity;
+  for (const b of bounds) {
+    const d = Math.abs(b - secondMark);
+    if (d < bestDist) { bestDist = d; best = b; }
+  }
+  if (bestDist > toleranceSeconds) return secondMark;
+  return best;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ┌─ FUTURE CODE SPLIT SEAM ────────────────────────────────────────────┐
 // │ When this file approaches 200 KB and module separation becomes       │
 // │ unavoidable, the STORY CLUSTERING block below is the cleanest first  │
@@ -1909,6 +2073,7 @@ async function clusterClips() {
     clipRole: c.aiAnalysis.clipRole || null,
     mood: c.aiAnalysis.mood,
     description: (c.aiAnalysis.content_description || c.aiAnalysis.suggested_clip_description || '').substring(0, 200),
+    transcript: (c.transcript?.text || '').substring(0, 240),
     tags: (c.aiAnalysis.tags || []).slice(0, 5),
     duration: Math.round(c.duration || 0),
     created: (c.createdTime || '').substring(0, 10),
@@ -1920,7 +2085,11 @@ async function clusterClips() {
     ? `\nThe client's services include: ${cats.join(', ')}. Story titles should reference the relevant service when applicable.`
     : '';
 
-  const prompt = `You are an expert short-form video editor for a trade-services brand. I have ${items.length} raw clips already analyzed by AI. Group these clips into "stories" — sets of clips that came from the same job/event and assemble into a coherent 30-60 second video.${catsBlock}
+  const transcribedCount = items.filter(i => i.transcript).length;
+  const transcriptHint = transcribedCount > 0
+    ? `\nMany clips include a 'transcript' field with what was actually spoken. Use this AS THE PRIMARY SIGNAL when grouping — clips where the worker is talking about the same job/topic should be in the same story even if filmed at different angles. Conversation threads matter more than visual similarity.`
+    : '';
+  const prompt = `You are an expert short-form video editor for a trade-services brand. I have ${items.length} raw clips already analyzed by AI. Group these clips into "stories" — sets of clips that came from the same job/event and assemble into a coherent 30-60 second video.${transcriptHint}${catsBlock}
 
 A story is typically 3-8 clips that share:
 - Same physical job/site (same drain, same water heater, same panel)
@@ -2184,6 +2353,9 @@ function buildEDL(opts) {
       if (ai.mood)                 lines.push(`    Mood     : ${ai.mood}`);
       if (ai.viral_potential)      lines.push(`    Potential: ${ai.viral_potential}`);
     }
+    if (cl.transcript?.text) {
+      lines.push(`    Spoken   : ${cl.transcript.text.substring(0, 220)}`);
+    }
   });
 
   lines.push('');
@@ -2207,6 +2379,64 @@ function buildEDL(opts) {
     lines.push('* No corner watermark — brand identity comes through voice + hashtags.');
   }
   lines.push('* Export 1080x1920, MP4 H.264, audio at -14 LUFS.');
+  // Caption track — assemble per-segment captions from transcripts, snapped
+  // to the segment's trim window and offset to the assembled-video timeline.
+  let captionLines = [];
+  let cumulative = 0;
+  let idx = 1;
+  tmpl.segments.forEach((seg, i) => {
+    const cd = segs[i];
+    const cl = cd ? clips.find(c => c.id === cd.clipId) : null;
+    if (cl?.transcript?.words?.length && cd) {
+      const segStart = cd.trimStart || 0;
+      const segEnd = cd.trimEnd || (cd.trimStart + seg.dur);
+      cl.transcript.words
+        .filter(w => w.s >= segStart && w.e <= segEnd)
+        .forEach(w => {
+          const out_s = cumulative + (w.s - segStart);
+          const out_e = cumulative + (w.e - segStart);
+          captionLines.push({ idx: idx++, start: out_s, end: out_e, text: w.w.trim() });
+        });
+    }
+    cumulative += seg.dur;
+  });
+
+  if (captionLines.length) {
+    // Group consecutive words into ~2-4 word caption chunks for readable pacing
+    const chunks = [];
+    let buffer = [];
+    captionLines.forEach((w, i) => {
+      buffer.push(w);
+      const next = captionLines[i + 1];
+      const gap = next ? next.start - w.end : 1;
+      if (buffer.length >= 3 || gap > 0.4 || !next) {
+        chunks.push({
+          start: buffer[0].start,
+          end:   buffer[buffer.length - 1].end,
+          text:  buffer.map(b => b.text).join(' '),
+        });
+        buffer = [];
+      }
+    });
+
+    lines.push('');
+    lines.push('----- CAPTION TRACK (SRT) -----');
+    const fmtSrt = s => {
+      const ms = Math.floor((s % 1) * 1000);
+      const sec = Math.floor(s % 60);
+      const min = Math.floor(s / 60) % 60;
+      const hr  = Math.floor(s / 3600);
+      return `${String(hr).padStart(2,'0')}:${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+    };
+    chunks.forEach((c, i) => {
+      lines.push(`${i+1}`);
+      lines.push(`${fmtSrt(c.start)} --> ${fmtSrt(c.end)}`);
+      lines.push(c.text);
+      lines.push('');
+    });
+    lines.push('Caption style: ' + (BRAND.captionPosition || 'lower-third') + ' / ' + (BRAND.captionBackdrop || 'shadow') + ' / white sans-serif');
+  }
+
   if (BRAND.hashtags && BRAND.hashtags.trim()) {
     lines.push('');
     lines.push('----- HASHTAG STACK (for caption / description) -----');
@@ -2378,6 +2608,13 @@ function trimForSegment(clip, seg) {
     trimStart = Math.max(0, Math.min(trimStart, Math.max(0, dur - 0.5)));
     trimEnd = Math.min(trimStart + seg.dur, dur);
   }
+  // Snap both ends to sentence boundaries when transcript is available.
+  // No more cuts mid-word — speech finishes naturally before the cut.
+  trimStart = snapToSentenceBoundary(clip, trimStart, 1.5);
+  trimEnd   = snapToSentenceBoundary(clip, trimEnd, 1.5);
+  // Sanity: ensure end > start, and end fits within clip duration
+  if (trimEnd <= trimStart) trimEnd = Math.min(trimStart + seg.dur, dur);
+  trimEnd = Math.min(trimEnd, dur);
   return { trimStart, trimEnd };
 }
 
