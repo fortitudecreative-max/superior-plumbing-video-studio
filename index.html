@@ -497,13 +497,16 @@
       </div>
 
       <!-- AI Recommendations -->
-      <div class="ai-rec" id="ai-rec" style="display:none">
-        <h4>🤖 AI Recommendation</h4>
+      <div class="ai-rec" id="ai-rec" style="display:none;width:280px;">
+        <h4 id="rec-clip-name">🤖 AI Recommendation</h4>
+        <div class="rec-item"><div class="rec-label">Title</div><div class="rec-val" id="rec-title">—</div></div>
+        <div class="rec-item"><div class="rec-label">Description</div><div class="rec-val" id="rec-desc" style="font-weight:400;font-size:10px;line-height:1.5;color:var(--text-muted);">—</div></div>
+        <div class="rec-item" style="display:flex;gap:6px;"><div style="flex:1;"><div class="rec-label">Category</div><div class="rec-val" id="rec-category">—</div></div><div><div class="rec-label">Role</div><div class="rec-val" id="rec-role" style="font-size:10px;">—</div></div></div>
+        <div class="rec-item" style="display:flex;gap:6px;"><div style="flex:1;"><div class="rec-label">Mood</div><div class="rec-val" id="rec-mood" style="font-size:10px;">—</div></div><div><div class="rec-label">Viral</div><div class="rec-val" id="rec-viral" style="font-size:10px;">—</div></div></div>
         <div class="rec-item"><div class="rec-label">Suggested Template</div><div class="rec-val" id="rec-tmpl">—</div></div>
-        <div class="rec-item"><div class="rec-label">Content Pillar</div><div class="rec-val" id="rec-pillar">—</div></div>
         <div class="rec-item"><div class="rec-label">Best Hook Moment</div><div class="rec-val" id="rec-hook">—</div></div>
         <div class="rec-item"><div class="rec-label">Suggested Hook Text</div><div class="rec-val" id="rec-hook-txt">—</div></div>
-        <button class="rec-action" onclick="applyAIRec()">Apply AI Recommendation</button>
+        <button class="rec-action" onclick="applyAIRec()">Apply Hook + Template</button>
       </div>
     </div>
 
@@ -1223,6 +1226,21 @@ async function pullFromDrive() {
   setTimeout(() => { btn.textContent = '📁 Pull from Google Drive'; }, 3000);
 }
 
+// User-facing click handler — selects the clip (highlights, populates AI Rec panel)
+// AND triggers preloadClip so the video blob downloads on demand.
+function selectClip(clipId) {
+  window._selectedClipId = clipId;
+  const clip = clips.find(c => c.id === clipId);
+  if (clip) {
+    // Visual selection highlight
+    document.querySelectorAll('.clip-card').forEach(el => el.style.outline = '');
+    const card = document.getElementById(clipId);
+    if (card) card.style.outline = '2px solid var(--primary)';
+    if (clip.aiAnalysis) populateAIRecPanel(clip);
+  }
+  preloadClip(clipId);
+}
+
 async function preloadClip(clipId) {
   const clip = clips.find(c => c.id === clipId);
   if (!clip || clip.loaded || clip.url) return; // already loaded
@@ -1559,11 +1577,16 @@ const templatePillarMap = {
 };
 
 function applyAIRec() {
-  // Apply the AI recommendation shown in the panel
-  const recTmpl = document.getElementById('rec-tmpl').dataset.id;
-  const recHook = document.getElementById('rec-hook-txt').textContent;
+  // Apply the AI recommendation shown in the panel into the editor inputs
+  const recTmpl  = document.getElementById('rec-tmpl').dataset.id;
+  const recHook  = document.getElementById('rec-hook-txt').textContent;
+  const recTitle = document.getElementById('rec-title').textContent;
   if (recTmpl) selectTmpl(recTmpl);
-  if (recHook && recHook !== '—') document.getElementById('hook-txt').value = recHook;
+  if (recHook  && recHook  !== '—') document.getElementById('hook-txt').value = recHook;
+  if (recTitle && recTitle !== '—') {
+    const titleEl = document.getElementById('vid-title');
+    if (titleEl && !titleEl.value) titleEl.value = recTitle;
+  }
   updOvr();
 }
 
@@ -1655,7 +1678,8 @@ function renderClips() {
       ? `<div title="${escapeHtml(cl.storyTitle||'')}" style="position:absolute;bottom:18px;left:3px;background:${cl.storyColor};color:white;font-size:7px;font-weight:700;padding:1px 4px;border-radius:2px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml((cl.storyTitle||'').substring(0,16))}</div>`
       : '';
     const cardBorder = cl.storyColor ? `style="border-color:${cl.storyColor};border-width:2px;"` : '';
-    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}" onclick="preloadClip('${cl.id}')" ${cardBorder}>
+    const titleAttr = cl.aiAnalysis ? `title="${escapeHtml((cl.aiAnalysis.suggested_clip_title||'') + (cl.aiAnalysis.suggested_clip_description ? ' — ' + cl.aiAnalysis.suggested_clip_description : ''))}"` : '';
+    return `<div class="clip-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${cl.id}')" id="${cl.id}" onclick="selectClip('${cl.id}')" ${cardBorder} ${titleAttr}>
       ${videoEl}
       <span class="c-dur">${durLabel}</span>
       <span class="c-tag" style="background:${categoryColor(mainTag)}">${escapeHtml(mainTag)}</span>
@@ -1687,18 +1711,38 @@ function renderClips() {
 
   updateAnalyzeAllButton();
 
-  // Show AI rec panel if a clip is selected/available
-  if (clips.length > 0 && clips[clips.length-1].aiAnalysis) {
-    const latest = clips[clips.length-1];
-    const ai = latest.aiAnalysis;
-    const recPanel = document.getElementById('ai-rec');
-    recPanel.style.display = 'block';
-    document.getElementById('rec-tmpl').textContent = TEMPLATES.find(t=>t.id===ai.template)?.name || ai.template;
-    document.getElementById('rec-tmpl').dataset.id = ai.template;
-    document.getElementById('rec-pillar').textContent = ai.pillar;
-    document.getElementById('rec-hook').textContent = ai.key_moment_start != null ? `${fmtT(ai.key_moment_start)} – ${fmtT(ai.key_moment_end)}` : '—';
-    document.getElementById('rec-hook-txt').textContent = ai.suggested_hook || '—';
+  // Auto-show AI rec panel for the most recently analyzed clip if no clip is
+  // currently selected. Click handler can override with a specific clip.
+  if (clips.length > 0 && !window._selectedClipId) {
+    const latest = [...clips].reverse().find(c => c.aiAnalysis);
+    if (latest) populateAIRecPanel(latest);
+  } else if (window._selectedClipId) {
+    const sel = clips.find(c => c.id === window._selectedClipId);
+    if (sel && sel.aiAnalysis) populateAIRecPanel(sel);
   }
+}
+
+// Populate the AI Recommendation panel with a specific clip's analysis details.
+// Called from clip-card clicks and from renderClips() default-latest fallback.
+function populateAIRecPanel(clip) {
+  const ai = clip && clip.aiAnalysis;
+  if (!ai) return;
+  const panel = document.getElementById('ai-rec');
+  if (!panel) return;
+  panel.style.display = 'block';
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text || '—'; };
+  set('rec-clip-name', '🤖 ' + (clip.name || 'Clip').substring(0, 24));
+  set('rec-title',     ai.suggested_clip_title);
+  set('rec-desc',      ai.suggested_clip_description || ai.content_description);
+  set('rec-category',  clipCategory(clip));
+  set('rec-role',      ai.clipRole);
+  set('rec-mood',      ai.mood);
+  set('rec-viral',     ai.viral_potential);
+  set('rec-tmpl',      TEMPLATES.find(t => t.id === ai.template)?.name || ai.template);
+  const tmplEl = document.getElementById('rec-tmpl');
+  if (tmplEl) tmplEl.dataset.id = ai.template || '';
+  set('rec-hook',      ai.key_moment_start != null ? `${fmtT(ai.key_moment_start)} – ${fmtT(ai.key_moment_end)}` : '—');
+  set('rec-hook-txt',  ai.suggested_hook);
 }
 
 function renderQueue() {
