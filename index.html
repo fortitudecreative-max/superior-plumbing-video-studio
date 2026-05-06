@@ -702,6 +702,51 @@ function loadClients() {
 }
 
 // ── Per-client data (clips + queue) persistence ───────
+// ── DRIVE OAUTH TOKEN CACHE ─────────────────────────────
+// Council-approved Layer 1: persist the access token + expiry to localStorage
+// (per client) so reloads don't force a re-Pull. Tokens still expire — Google
+// caps them at ~1 hour — but we no longer wipe them on every page load. When
+// they DO expire, the next operation that needs Drive will trigger a re-Pull.
+const TOKEN_LIFETIME_MS = 55 * 60 * 1000; // 55 min — safety margin under Google's 1hr expiry
+
+function saveDriveToken(clientId, token) {
+  if (!clientId || !token) return;
+  try {
+    const payload = { token, expiresAt: Date.now() + TOKEN_LIFETIME_MS };
+    localStorage.setItem('sp_video_token_' + clientId, JSON.stringify(payload));
+  } catch(e) { console.warn('Failed to save token:', e); }
+}
+
+function loadDriveToken(clientId) {
+  if (!clientId) return null;
+  try {
+    const raw = localStorage.getItem('sp_video_token_' + clientId);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload.token || !payload.expiresAt) return null;
+    if (Date.now() >= payload.expiresAt) return null;  // expired
+    return payload.token;
+  } catch(e) { return null; }
+}
+
+function clearDriveToken(clientId) {
+  if (!clientId) return;
+  try { localStorage.removeItem('sp_video_token_' + clientId); } catch(e) {}
+}
+
+function isTokenValid(clientId) {
+  return !!loadDriveToken(clientId);
+}
+
+// Apply a cached token to all clips in memory (so they can fetch blobs without
+// going through pullFromDrive again). Call this on launch + after a token save.
+function applyCachedTokenToClips(clientId) {
+  const token = loadDriveToken(clientId);
+  if (!token) return false;
+  clips.forEach(c => { if (c.driveId) c.accessToken = token; });
+  return true;
+}
+
 function saveClientData(clientId) {
   if (!clientId) return;
   try {
@@ -749,6 +794,8 @@ function loadClientData(clientId) {
     }
     STORIES.length = 0;
     if (Array.isArray(data.stories)) data.stories.forEach(s => STORIES.push(s));
+    // Restore cached OAuth token onto clips so blobs can fetch without a fresh pull
+    applyCachedTokenToClips(clientId);
     renderStoriesPanel?.();
   } catch(e) { console.warn('Failed to load client data:', e); }
 }
@@ -1146,6 +1193,8 @@ async function pullFromDrive() {
               // (which expires after ~1 hour of OAuth session). Net effect:
               // re-pulling on month two only adds the new clips of that month.
               const accessToken = tokenResponse.access_token;
+              // Persist for reuse across page reloads (Layer 1 of council fix)
+              saveDriveToken(activeClientId, accessToken);
               const existingByDriveId = new Map();
               clips.forEach(c => { if (c.driveId) existingByDriveId.set(c.driveId, c); });
 
@@ -2577,7 +2626,21 @@ function loadQueue(i) {
     document.getElementById('cta-txt').value=q.cta||'';
     document.getElementById('vid-title').value=q.title||'';
     renderTmpls(); renderTL(); updPreview(); setTab('editor');
+    // Auto-preload every assigned clip in parallel so Play works without delay.
+    // Each preloadClip is idempotent — skips clips that already have a blob URL.
+    preloadAllSegmentClips();
   }
+}
+
+// Preload every clip referenced by the current segClips. Used after loadQueue
+// and as a safety net in playPreview. Returns a promise that resolves when ALL
+// clips have either downloaded their blob or failed (does not reject — best effort).
+async function preloadAllSegmentClips() {
+  const ids = Object.values(segClips).map(s => s?.clipId).filter(Boolean);
+  if (!ids.length) return;
+  await Promise.all(ids.map(id => preloadClip(id).catch(e => console.warn('preload failed', id, e))));
+  // Re-paint preview now that the first clip's blob URL exists
+  updPreview();
 }
 
 // ═══════════════════════════════════════
@@ -2588,9 +2651,24 @@ function updPreview() {
   const cd = segClips[0];
   if (cd) {
     const cl = clips.find(c=>c.id===cd.clipId);
-    if (cl) { v.src=cl.url; v.currentTime=cd.trimStart; v.style.display='block'; em.style.display='none'; ov.style.display='flex'; updOvr(); return; }
+    if (cl) {
+      if (cl.url) {
+        v.src = cl.url;
+        v.currentTime = cd.trimStart;
+        v.style.display='block'; em.style.display='none'; ov.style.display='flex'; updOvr();
+        return;
+      }
+      // Clip is referenced but blob not downloaded yet — kick off preload
+      // and show a "Loading…" state until it's ready.
+      em.querySelector('.e-icon').textContent = '⏳';
+      em.lastChild.textContent = ' Loading clip…';
+      em.style.display='flex'; v.style.display='none'; ov.style.display='none';
+      preloadClip(cl.id).then(() => updPreview()).catch(() => {});
+      return;
+    }
   }
   v.style.display='none'; em.style.display='flex'; ov.style.display='none';
+  em.querySelector('.e-icon').textContent = '📱';
 }
 
 function updOvr() {
@@ -2598,21 +2676,30 @@ function updOvr() {
   document.getElementById('o-cta').textContent = document.getElementById('cta-txt').value || (BRAND.defaultCTA || '');
 }
 
-function playPreview() {
+async function playPreview() {
   const v = document.getElementById('pvid');
   if (!selTmpl||!Object.keys(segClips).length) return;
   if (playing) { v.pause(); playing=false; document.getElementById('play-btn').textContent='▶ Play'; clearTimeout(playTimer); return; }
-  playing=true; document.getElementById('play-btn').textContent='⏸ Pause'; playIdx=0; playNext();
+  // Safety net: ensure all assigned clips have blob URLs before starting
+  const btn = document.getElementById('play-btn');
+  btn.textContent = '⏳ Loading…';
+  await preloadAllSegmentClips();
+  btn.textContent = '⏸ Pause';
+  playing=true; playIdx=0; playNext();
 }
 
-function playNext() {
+async function playNext() {
   if (!playing||playIdx>=selTmpl.segments.length) { playing=false; document.getElementById('play-btn').textContent='▶ Play'; return; }
   const cd=segClips[playIdx];
   if (!cd) { playIdx++; playNext(); return; }
   const cl=clips.find(c=>c.id===cd.clipId);
   if (!cl) { playIdx++; playNext(); return; }
+  // If somehow this clip isn't loaded, await it before playing
+  if (!cl.url) { try { await preloadClip(cl.id); } catch(e) {} }
   const v=document.getElementById('pvid');
-  v.src=cl.url; v.currentTime=cd.trimStart; v.muted=false; v.play();
+  if (!cl.url) { console.warn('Skipping unloadable clip', cl.name); playIdx++; playNext(); return; }
+  v.src=cl.url; v.currentTime=cd.trimStart; v.muted=false;
+  try { await v.play(); } catch(e) { console.warn('play() rejected', e); }
   selTmpl.segments.forEach((_,i)=>{ const el=document.getElementById('seg-'+i); if(el) el.style.borderColor=i===playIdx?'var(--primary)':'var(--border)'; });
   playTimer = setTimeout(()=>{ v.pause(); playIdx++; playNext(); }, (cd.trimEnd-cd.trimStart)*1000);
 }
