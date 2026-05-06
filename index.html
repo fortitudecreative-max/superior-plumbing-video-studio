@@ -2142,6 +2142,7 @@ function renderQueue() {
         <div class="q-sub">${dn} May ${q.day} · ${escapeHtml(q.storyJobCategory || q.pillar || '')}${segMeta}</div>
       </div>
       <span class="q-badge ${sc}">${st}</span>
+      <button onclick="event.stopPropagation();aiEditQueueSlot(${i})" title="AI editor — re-edit this video using transcripts + multi-frame analysis (~$0.20)" style="background:var(--bg-elev);border:1px solid var(--primary);color:var(--primary);padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;margin-right:4px;">🧠 AI Edit</button>
       ${canExport ? `<button onclick="event.stopPropagation();exportQueueSlot(${i})" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;">📤 EDL</button>` : ''}
     </div>`;
   }).join('');
@@ -3110,6 +3111,291 @@ Return ONLY a JSON object: {"order": [<idx>, <idx>, ...]} where the array is exa
   } catch (e) {
     console.warn('Ordering pass failed, falling back:', e);
     return chosenClips;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI EDITOR — GPT-4o thinks like a real video editor
+// ═══════════════════════════════════════════════════════════════════════
+// Replaces the rigid template-fills-segments approach for an individual slot.
+// We hand GPT-4o the full story (multi-frame visuals + transcripts of each clip)
+// AND a codified editor's rulebook, then ask it to PRODUCE the actual edit:
+// which clips, what trim points, captions per cut, hook copy, title, description.
+//
+// Cost: roughly $0.15-0.25 per video (5 clips × 3 keyframes = 15 vision tokens
+// at low detail + ~3KB text in/out). Cheap enough to test individually before
+// promoting to default.
+
+async function extractKeyframes(clip, count) {
+  if (count == null) count = 3;
+  if (!clip.url) await preloadClip(clip.id);
+  if (!clip.url) throw new Error(`Could not load blob for ${clip.name}`);
+  const video = document.createElement('video');
+  video.src = clip.url;
+  video.muted = true;
+  video.crossOrigin = 'anonymous';
+  await new Promise((res, rej) => {
+    video.onloadedmetadata = res;
+    video.onerror = () => rej(new Error('video load failed'));
+  });
+  const dur = video.duration || clip.duration || 1;
+  const frames = [];
+  for (let i = 0; i < count; i++) {
+    const t = (dur / (count + 1)) * (i + 1);
+    video.currentTime = Math.max(0.1, Math.min(t, dur - 0.1));
+    await new Promise(r => { video.onseeked = r; video.onerror = r; });
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 568;
+    canvas.getContext('2d').drawImage(video, 0, 0, 320, 568);
+    frames.push(canvas.toDataURL('image/jpeg', 0.5));
+  }
+  return frames;
+}
+
+async function aiEditStoryToVideo(clipPool, opts) {
+  opts = opts || {};
+  const targetDur = opts.targetDurationS || 30;
+  const hookTone  = opts.hookTone || (BRAND.hookTone || 'storyteller');
+  const brandName = (getActiveClient()||{}).name || 'this brand';
+
+  if (!clipPool.length) throw new Error('No clips provided');
+
+  // Extract keyframes for every clip — done in parallel for speed
+  const enriched = await Promise.all(clipPool.map(async (c, i) => {
+    let frames = [];
+    try { frames = await extractKeyframes(c, 3); } catch (e) {
+      console.warn('keyframe extraction failed for', c.name, e);
+    }
+    return {
+      idx: i, c,
+      summary: {
+        idx: i,
+        name: c.name?.substring(0,40),
+        durationS: Math.round(c.duration || 0),
+        jobCategory: clipCategory(c),
+        clipRole: c.aiAnalysis?.clipRole || null,
+        mood: c.aiAnalysis?.mood || null,
+        spoken: (c.transcript?.text || '').substring(0, 800),
+        // Word-level timestamps so the editor knows exactly where sentences end
+        sentenceEnds: c.transcript?.boundaries || [],
+      },
+      frames,
+    };
+  }));
+
+  // Build the editor's rule book — these are the rules the AI follows
+  const rules = `You are a senior short-form video editor producing 9:16 vertical videos for "${brandName}" — Facebook, TikTok, Instagram Reels.
+
+YOUR EDITORIAL CRAFT — rules you ALWAYS follow:
+
+1. OPEN ON MOTION OR ANTICIPATION. The first 1-2 seconds must show something visually compelling — water flowing, a tool engaging, a worker reaching, a problem revealing itself. Never open on setup, walking-up shots, or static establishing frames.
+
+2. MAINTAIN TEMPORAL & SPATIAL CONTINUITY. If clip A ends with hands reaching for a tool, clip B should show that tool in use — not a different scene at a different location. The viewer should feel like they're watching one continuous job.
+
+3. CUT ON ACTION, NEVER MID-GESTURE. A pipe cracks → cut to the water flowing → cut to the operator's reaction. Don't cut while someone is mid-reach, mid-sentence, or mid-motion.
+
+4. CUTS MUST RESPECT SPEECH CONTINUITY. If the worker says "now watch this..." the next clip MUST show what they're pointing to. NEVER cut to a clip whose dialogue starts mid-sentence about a different topic. Use sentenceEnds[] arrays to find natural pause points.
+
+5. HOLD APPROPRIATE BEATS. Important visual reveals (the gross clog coming out, the satisfying clean pipe) get 2-3 seconds of breathing room. Process shots get 1-2 seconds. Never give a filler shot more than 1 second.
+
+6. LAND ON PAYOFF OR VISUAL REST. The last cut is the satisfying moment — clean drain, completed install, customer relief, finished worksite. Not a random ambient frame.
+
+7. HOOK COPY IS DESCRIPTIVE, NOT PROMOTIONAL. ${hookTone === 'storyteller' ? '"FLOOD on the 5th floor", "The start of a rough night"' : hookTone === 'question' ? '"Ever heard of Maintenance Rodding?"' : 'Conversational, not hype.'} NEVER write "Watch this!" or "You won't believe...".
+
+8. CAPTIONS DESCRIBE THIS SPECIFIC MOMENT. Each cut gets its own short caption (3-7 words) that describes what's HAPPENING IN THAT CUT, not the overall video. Examples: "Cracking the cleanout", "Snake threads in", "There's the blockage", "Flow restored".
+
+9. TARGET DURATION: ${targetDur} seconds total. 4-7 cuts is the sweet spot. Each cut 2-7 seconds. The math should work out to ${targetDur}s.
+
+10. PICK YOUR CUTS FROM THE PROVIDED CLIPS ONLY. You may use a subset — not every clip has to make it. You may use the same clip twice if necessary, but prefer variety.
+
+For each clip you have:
+  • 3 keyframes (start / middle / end of the clip)
+  • Full spoken transcript
+  • Available sentence-end timestamps (the safe places to cut)
+  • Job category and your earlier role assessment
+
+OUTPUT FORMAT — return EXACTLY this JSON object:
+
+{
+  "title": "4-8 word descriptive title in ${hookTone} voice",
+  "description": "1-2 sentence narrative summary of the assembled video",
+  "hook":  "First-3-second overlay text in ${hookTone} voice — under 8 words",
+  "cta":   "Last-5-second overlay text — short, brand-relevant",
+  "edits": [
+    {
+      "clipIdx": 0,
+      "trimStart": 4.20,
+      "trimEnd":   8.50,
+      "caption":   "Snake threads into main line",
+      "purpose":   "establish the problem visually"
+    },
+    ...
+  ],
+  "narrativeRationale": "1-2 sentences explaining the overall edit choice"
+}
+
+CRITICAL: trimStart/trimEnd must be valid timestamps within the clip's duration AND should align with sentenceEnds[] when speech is involved. The TOTAL of (trimEnd - trimStart) across all edits should equal ${targetDur} seconds (±2s).`;
+
+  // Build the multi-modal user message
+  const content = [
+    { type: 'text', text: rules + '\n\nAVAILABLE CLIPS:\n' },
+  ];
+  for (const e of enriched) {
+    content.push({ type: 'text', text: `
+=== Clip ${e.idx}: ${e.summary.name} (${e.summary.durationS}s, ${e.summary.jobCategory}) ===
+Spoken: ${e.summary.spoken || '(no speech)'}
+Safe cut points (sentence ends): ${e.summary.sentenceEnds.map(s => s.toFixed(1)).join(', ')}
+Keyframes (start, middle, end):` });
+    for (const f of e.frames) content.push({ type: 'image_url', image_url: { url: f, detail: 'low' } });
+  }
+  content.push({ type: 'text', text: `\n\nNow EDIT these clips into a coherent ${targetDur}-second video following all the editorial rules above. Return only the JSON object.` });
+
+  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content }],
+      max_tokens: 1500,
+      response_format: { type: 'json_object' },
+      temperature: 0.4,
+    })
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`AI editor call failed (${resp.status}): ${errText.substring(0, 200)}`);
+  }
+  const data = await resp.json();
+  const edit = JSON.parse(data.choices[0].message.content);
+  // Attach the original clip references onto each edit for downstream
+  edit.edits = (edit.edits || []).map(e => ({
+    ...e,
+    clipId: clipPool[e.clipIdx]?.id,
+  })).filter(e => e.clipId);
+  return edit;
+}
+
+// Apply an AI editor's output to a queue slot. Builds a synthetic template
+// matching the edit's cut count, replaces segs/hook/cta/title/description.
+function applyAIEditToSlot(slotIdx, edit) {
+  const q = queue[slotIdx];
+  if (!q || !edit?.edits?.length) return false;
+
+  // Build a synthetic template specifically for this edit's cut structure
+  const synthSegments = edit.edits.map((e, i) => ({
+    name: e.purpose || `Cut ${i+1}`,
+    dur: Math.max(0.5, Math.round((e.trimEnd - e.trimStart) * 10) / 10),
+    color: ['#d60000','#10b981','#f59e0b','#3b82f6','#8b5cf6','#ec4899','#14b8a6'][i % 7],
+    desc: e.caption || '',
+  }));
+  const synthTmpl = {
+    id: 'ai-edit-' + Date.now().toString(36),
+    name: 'AI Edit',
+    dur: synthSegments.reduce((s, x) => s + x.dur, 0).toFixed(0) + 's',
+    color: 'var(--primary)',
+    icon: '🧠',
+    segments: synthSegments,
+    isAIEdit: true,
+  };
+  // Register the synthetic template so renderTL can find it
+  TEMPLATES.push(synthTmpl);
+
+  // Trim down TEMPLATES if we have too many synthetic ones (keep last 30)
+  let aiEditCount = TEMPLATES.filter(t => t.isAIEdit).length;
+  while (aiEditCount > 30) {
+    const idx = TEMPLATES.findIndex(t => t.isAIEdit);
+    if (idx >= 0) TEMPLATES.splice(idx, 1);
+    aiEditCount--;
+  }
+
+  // Build segs map
+  const newSegs = {};
+  edit.edits.forEach((e, i) => {
+    newSegs[i] = {
+      clipId: e.clipId,
+      trimStart: e.trimStart,
+      trimEnd: e.trimEnd,
+      caption: e.caption,
+      purpose: e.purpose,
+    };
+  });
+
+  q.tmplUsed = synthTmpl.id;
+  q.segs = newSegs;
+  q.hook = edit.hook || q.hook;
+  q.cta  = edit.cta  || q.cta;
+  if (edit.title) q.title = edit.title;
+  q.storyDescription = edit.description || q.storyDescription;
+  q.editRationale = edit.narrativeRationale || '';
+  q.status = 'ready';
+  q.savedAt = new Date().toISOString();
+  q.editorMode = 'ai';
+  return true;
+}
+
+// Per-slot AI edit — wraps everything together
+async function aiEditQueueSlot(slotIdx) {
+  if (!CONFIG.ai.enabled || CONFIG.ai.provider !== 'openai') {
+    alert('AI Edit requires OpenAI provider with API key.');
+    return;
+  }
+  const q = queue[slotIdx];
+  if (!q) return;
+
+  // Determine which clips to send to the editor: prefer the slot's existing
+  // story (if it has one), else the dominant story near this slot, else the
+  // current segs' clips, else the largest available story.
+  let clipPool = [];
+  if (q.storyId) {
+    const story = STORIES.find(s => s.id === q.storyId);
+    if (story) clipPool = (story.clipIndices || []).map(idx => clips.filter(c => c.aiAnalysis)[idx]).filter(Boolean);
+  }
+  if (!clipPool.length && q.segs) {
+    clipPool = Object.values(q.segs).map(s => clips.find(c => c.id === s.clipId)).filter(Boolean);
+  }
+  if (!clipPool.length && STORIES.length) {
+    // Pick the biggest story
+    const biggest = [...STORIES].sort((a,b) => (b.clipIndices||[]).length - (a.clipIndices||[]).length)[0];
+    if (biggest) clipPool = (biggest.clipIndices || []).map(idx => clips.filter(c => c.aiAnalysis)[idx]).filter(Boolean);
+  }
+
+  if (clipPool.length < 2) {
+    alert('Need at least 2 analyzed clips in this story before AI Edit can run. Try Find Stories or assign clips first.');
+    return;
+  }
+
+  if (!confirm(`Run AI Editor on Day ${q.day} ("${q.title}")?
+
+• ${clipPool.length} clips will be sent to GPT-4o with full transcripts and 3 keyframes each.
+• Cost ~$0.15-0.25.
+• The AI will produce a real edit (cuts, trims, captions, hook, title) following editorial rules.
+• Existing assignments for this slot will be replaced.`)) return;
+
+  // Find the row's button to update progress
+  const rows = document.querySelectorAll('.q-item');
+  const row = Array.from(rows).find(r => r.textContent.includes(q.title));
+  const btn = row?.querySelector('button');
+  const origText = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '🧠 Editing…'; }
+
+  try {
+    const edit = await aiEditStoryToVideo(clipPool, {
+      targetDurationS: 30,
+      hookTone: BRAND.hookTone,
+    });
+    const ok = applyAIEditToSlot(slotIdx, edit);
+    if (!ok) throw new Error('Failed to apply edit to slot');
+    if (activeClientId) saveClientData(activeClientId);
+    renderQueue();
+    // If this slot is currently loaded into the editor, refresh it
+    if (curQIdx === slotIdx) loadQueue(slotIdx);
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Edited'; setTimeout(() => { btn.textContent = '🧠 AI Edit'; }, 3000); }
+    console.log('AI Edit produced:', edit);
+  } catch (e) {
+    console.error('AI Edit failed:', e);
+    if (btn) { btn.disabled = false; btn.textContent = '⚠ Failed'; setTimeout(() => { btn.textContent = origText || '🧠 AI Edit'; }, 4000); }
+    alert('AI Edit failed: ' + (e.message || e));
   }
 }
 
