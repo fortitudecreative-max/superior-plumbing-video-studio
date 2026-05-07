@@ -485,6 +485,9 @@
       <button class="drive-btn" id="transcribe-btn" onclick="transcribeAllClips()" style="display:none;background:var(--bg-elev);border-color:var(--primary);color:var(--primary);font-weight:600;">
         📝 Transcribe All
       </button>
+      <button class="drive-btn" id="gemini-analyze-btn" onclick="analyzeAllClipsGemini()" style="display:none;background:linear-gradient(135deg,#4285f4,#34a853);border-color:#4285f4;font-weight:600;color:white;" title="Native video understanding via Gemini 2.5 — uploads each clip and gets rich metadata (hero moments, motion peaks, role classification)">
+        🎬 Analyze Videos with Gemini
+      </button>
       <div id="stories-panel" style="display:none;margin-bottom:10px;"></div>
       <div class="upload-zone" id="uzone">
         <div class="upload-icon">🎬</div>
@@ -968,6 +971,10 @@ function updateConnBadges() {
   if (cBtn) cBtn.style.display = CONFIG.ai.enabled ? 'block' : 'none';
   const tBtn = document.getElementById('transcribe-btn');
   if (tBtn) tBtn.style.display = CONFIG.ai.enabled ? 'block' : 'none';
+  const gBtn = document.getElementById('gemini-analyze-btn');
+  // Show Gemini button when there are clips AND a Gemini key is configured (or active provider is Gemini)
+  const hasGeminiKey = !!(CONFIG.ai.geminiKey || (CONFIG.ai.provider === 'gemini' && CONFIG.ai.key));
+  if (gBtn) gBtn.style.display = (hasGeminiKey && typeof clips !== 'undefined' && clips.length > 0) ? 'block' : 'none';
 }
 
 // ── Apply client's brand to live CSS variables, watermark, etc. ──
@@ -3128,148 +3135,398 @@ Return ONLY a JSON object: {"order": [<idx>, <idx>, ...]} where the array is exa
 
 async function extractKeyframes(clip, count) {
   if (count == null) count = 3;
+  // In-memory cache — session-scoped, no localStorage bloat
+  if (clip._keyframeCache && clip._keyframeCache.length >= count) {
+    return clip._keyframeCache.slice(0, count);
+  }
   if (!clip.url) await preloadClip(clip.id);
   if (!clip.url) throw new Error(`Could not load blob for ${clip.name}`);
   const video = document.createElement('video');
   video.src = clip.url;
   video.muted = true;
   video.crossOrigin = 'anonymous';
-  await new Promise((res, rej) => {
-    video.onloadedmetadata = res;
-    video.onerror = () => rej(new Error('video load failed'));
-  });
+
+  // Metadata load with timeout — abandon if browser hangs
+  const metaOk = await Promise.race([
+    new Promise(res => {
+      video.onloadedmetadata = () => res(true);
+      video.onerror = () => res(false);
+    }),
+    new Promise(res => setTimeout(() => res(false), 5000))
+  ]);
+  if (!metaOk) {
+    console.warn('extractKeyframes: metadata load timeout for', clip.name);
+    return [];
+  }
+
   const dur = video.duration || clip.duration || 1;
   const frames = [];
   for (let i = 0; i < count; i++) {
     const t = (dur / (count + 1)) * (i + 1);
-    video.currentTime = Math.max(0.1, Math.min(t, dur - 0.1));
-    await new Promise(r => { video.onseeked = r; video.onerror = r; });
-    const canvas = document.createElement('canvas');
-    canvas.width = 320;
-    canvas.height = 568;
-    canvas.getContext('2d').drawImage(video, 0, 0, 320, 568);
-    frames.push(canvas.toDataURL('image/jpeg', 0.5));
+    const target = Math.max(0.1, Math.min(t, dur - 0.1));
+    // Race each seek against a 3s timeout — if browser hangs, skip frame and continue
+    const seekOk = await new Promise(res => {
+      let done = false;
+      const finish = ok => { if (!done) { done = true; res(ok); } };
+      const onseeked = () => { video.removeEventListener('seeked', onseeked); finish(true); };
+      video.addEventListener('seeked', onseeked);
+      setTimeout(() => { video.removeEventListener('seeked', onseeked); finish(false); }, 3000);
+      try { video.currentTime = target; }
+      catch (e) { finish(false); }
+    });
+    if (!seekOk) {
+      console.warn('extractKeyframes: seek to ' + target.toFixed(2) + 's timed out for', clip.name);
+      continue;
+    }
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 568;
+      canvas.getContext('2d').drawImage(video, 0, 0, 320, 568);
+      frames.push(canvas.toDataURL('image/jpeg', 0.5));
+    } catch (e) {
+      console.warn('extractKeyframes: canvas draw failed for', clip.name, e.message);
+    }
   }
+  clip._keyframeCache = frames;
   return frames;
 }
 
+// ─── GEMINI 2.5 VIDEO API INTEGRATION ───────────────────────
+// Native video understanding via Google's Files API + generateContent.
+// Uses CONFIG.ai.geminiKey if set, else falls back to CONFIG.ai.key (when provider=gemini).
+// Endpoint host: generativelanguage.googleapis.com (CORS-allowed for browser).
+
+async function getClipBlob(clip) {
+  if (clip.source === 'local' && clip.fileHandle) {
+    return await clip.fileHandle.getFile();
+  }
+  if (clip.streamUrl && clip.accessToken) {
+    const resp = await fetch(clip.streamUrl, { headers: { 'Authorization': 'Bearer ' + clip.accessToken } });
+    if (!resp.ok) throw new Error('Drive fetch failed: ' + resp.status);
+    return await resp.blob();
+  }
+  if (clip.url && clip.url.startsWith('blob:')) {
+    const resp = await fetch(clip.url);
+    return await resp.blob();
+  }
+  throw new Error('No accessible source for clip ' + clip.name);
+}
+
+function buildGeminiClipAnalysisPrompt(clip, brand) {
+  const brandName = brand?.name || 'this brand';
+  const hookTone = brand?.hookTone || 'storyteller';
+  const categoriesArr = (brand?.jobCategories || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const categories = categoriesArr.length ? categoriesArr.join(', ') : '(none configured)';
+  const dur = (clip.duration || 0).toFixed(1);
+  const durRound = Math.round(clip.duration || 0);
+  return [
+    'You are analyzing a single video clip for "' + brandName + '" — a trade/service business that produces 30-second vertical videos for TikTok, Instagram Reels, and Facebook.',
+    '',
+    'WATCH the entire clip carefully. Pay attention to:',
+    '- What the worker is physically doing at each moment (motion, gestures, tool use)',
+    '- Where the visually compelling "hero shots" are — close-ups of the work, the problem revealing itself, satisfying reveals',
+    '- Whether the clip shows the PROBLEM (something wrong), the PROCESS (work being done), the RESULT (the fix completed), or CONTEXT (setup/establishing/B-roll)',
+    '- Any moments worth opening a Reel with (motion, anticipation, drama)',
+    '',
+    'The clip filename is "' + clip.name + '" and reported duration is ' + dur + 's.',
+    'Job categories for this brand: ' + categories + '.',
+    'Hook voice: ' + hookTone + ' — descriptive plain-words moment-framing, never "Watch this!" or "You won\'t believe...".',
+    '',
+    'Return EXACTLY this JSON (no extra fields):',
+    '{',
+    '  "jobCategory": "exact match from category list, or Unclassified",',
+    '  "jobCategoryConfidence": 0.0,',
+    '  "clipRole": "problem|process|result|context|testimonial",',
+    '  "clipRoleConfidence": 0.0,',
+    '  "suggested_clip_title": "4-8 word descriptive title",',
+    '  "content_description": "2-3 sentence factual description of what visually happens across the whole clip",',
+    '  "suggested_hook": "under 10 words in ' + hookTone + ' voice",',
+    '  "mood": "satisfying|dramatic|educational|funny|wholesome|professional|gross-but-satisfying",',
+    '  "viral_potential": "low|medium|high",',
+    '  "hookWorthiness": 0.0,',
+    '  "visualQuality": 0.0,',
+    '  "heroMoments": [{ "t": 4.2, "description": "what happens", "score": 0.9 }],',
+    '  "motionPeaks": [{ "t": 1.5, "type": "tool_engaging" }],',
+    '  "perSecondDescription": [{ "t": 0, "what": "description" }],',
+    '  "trim_suggestions": { "hook_start": 0, "content_start": 2.0, "reveal_start": 8.5, "cta_start": 25.0 },',
+    '  "tags": ["tag1","tag2"],',
+    '  "best_text_overlay": "mid-clip caption",',
+    '  "music_mood": "upbeat|chill|dramatic|funny|motivational"',
+    '}',
+    '',
+    'CRITICAL:',
+    '- heroMoments timestamps MUST be actual seconds within the clip (0 to ' + dur + ').',
+    '- perSecondDescription should have one entry per second (so ~' + durRound + ' entries).',
+    '- Be honest about clipRoleConfidence — score lower if ambiguous.',
+    '- visualQuality scores framing/stability/lighting (1.0=broadcast, 0.5=usable, 0.2=unusable).',
+    '- hookWorthiness scores whether the first 1-2 seconds would stop a scrolling viewer.'
+  ].join('\n');
+}
+
+async function analyzeClipGeminiVideo(clip, opts) {
+  opts = opts || {};
+  const apiKey = opts.apiKey || CONFIG.ai.geminiKey || (CONFIG.ai.provider === 'gemini' ? CONFIG.ai.key : null);
+  const model = opts.model || 'gemini-2.5-flash';
+  const brand = opts.brand || (typeof BRAND !== 'undefined' ? BRAND : {});
+  if (!apiKey) throw new Error('No Gemini API key configured. Set it in Setup → AI Provider → Gemini API Key.');
+
+  const videoBlob = await getClipBlob(clip);
+  const mimeType = videoBlob.type || 'video/mp4';
+
+  // 1. Initiate resumable upload (unified host: generativelanguage.googleapis.com — CORS-allowed)
+  const initResp = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files', {
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': apiKey,
+      'X-Goog-Upload-Protocol': 'resumable',
+      'X-Goog-Upload-Command': 'start',
+      'X-Goog-Upload-Header-Content-Length': String(videoBlob.size),
+      'X-Goog-Upload-Header-Content-Type': mimeType,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ file: { display_name: clip.name || 'clip.mp4' } })
+  });
+  if (!initResp.ok) {
+    const err = await initResp.text();
+    throw new Error('Gemini upload init failed: ' + initResp.status + ' ' + err.substring(0, 200));
+  }
+  const sessionUri = initResp.headers.get('x-goog-upload-url');
+  if (!sessionUri) throw new Error('No x-goog-upload-url returned');
+
+  // 2. Upload bytes
+  const uploadResp = await fetch(sessionUri, {
+    method: 'POST',
+    headers: {
+      'Content-Length': String(videoBlob.size),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize'
+    },
+    body: videoBlob
+  });
+  if (!uploadResp.ok) {
+    const err = await uploadResp.text();
+    throw new Error('Gemini upload failed: ' + uploadResp.status + ' ' + err.substring(0, 200));
+  }
+  const fileInfo = await uploadResp.json();
+  const fileUri = fileInfo.file?.uri;
+  const fileName = fileInfo.file?.name;
+  if (!fileUri || !fileName) throw new Error('No file URI returned from Gemini upload');
+
+  // 3. Poll for state to become ACTIVE (60s timeout)
+  const pollStart = Date.now();
+  let state = fileInfo.file.state || 'PROCESSING';
+  while (state === 'PROCESSING') {
+    if (Date.now() - pollStart > 60000) throw new Error('Gemini file processing timed out after 60s');
+    await new Promise(r => setTimeout(r, 1500));
+    const statusResp = await fetch('https://generativelanguage.googleapis.com/v1beta/' + fileName, {
+      headers: { 'x-goog-api-key': apiKey }
+    });
+    if (!statusResp.ok) throw new Error('Status check failed: ' + statusResp.status);
+    const statusData = await statusResp.json();
+    state = statusData.state;
+    if (state === 'FAILED') throw new Error('Gemini file processing FAILED');
+  }
+
+  // 4. generateContent with file URI
+  const prompt = buildGeminiClipAnalysisPrompt(clip, brand);
+  const genResp = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+    method: 'POST',
+    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [
+        { text: prompt },
+        { file_data: { mimeType: mimeType, fileUri: fileUri } }
+      ]}],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.4 }
+    })
+  });
+  if (!genResp.ok) {
+    const err = await genResp.text();
+    throw new Error('Gemini generateContent failed: ' + genResp.status + ' ' + err.substring(0, 300));
+  }
+  const result = await genResp.json();
+  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned no text');
+  const parsed = JSON.parse(text);
+
+  // 5. Cleanup uploaded file (auto-expires in 48h anyway, but free up the 2GB quota)
+  try {
+    await fetch('https://generativelanguage.googleapis.com/v1beta/' + fileName, {
+      method: 'DELETE',
+      headers: { 'x-goog-api-key': apiKey }
+    });
+  } catch (e) {}
+
+  parsed._analyzer = 'gemini-2.5-video';
+  parsed._analyzedAt = new Date().toISOString();
+  return parsed;
+}
+
+async function analyzeAllClipsGemini(opts) {
+  opts = opts || {};
+  const force = !!opts.force;
+  const apiKey = opts.apiKey || CONFIG.ai.geminiKey || (CONFIG.ai.provider === 'gemini' ? CONFIG.ai.key : null);
+  if (!apiKey) {
+    alert('No Gemini API key configured. Open Setup (gear icon) → enter your Gemini API key in the brand form.');
+    return;
+  }
+  const eligible = clips.filter(c => force || c.aiAnalysis?._analyzer !== 'gemini-2.5-video');
+  if (!eligible.length) { alert('All clips already Gemini-analyzed. Use force:true to re-analyze.'); return; }
+  if (!confirm(`Analyze ${eligible.length} clip${eligible.length===1?'':'s'} with Gemini 2.5 video?\n\nThis uploads each clip to Google's Files API, the model watches the actual video, and returns rich metadata (hero moments, motion peaks, role classification with confidence, hook-worthiness).\n\nCost: ~$0.075/min of video. Files auto-delete in 48h.`)) return;
+
+  const btn = document.getElementById('gemini-analyze-btn');
+  if (btn) { btn.disabled = true; }
+  let done = 0, failed = 0;
+  for (const clip of eligible) {
+    if (btn) btn.textContent = '🎬 Analyzing ' + (done + 1) + '/' + eligible.length + '…';
+    try {
+      const newAnalysis = await analyzeClipGeminiVideo(clip, { apiKey });
+      clip.aiAnalysis = { ...(clip.aiAnalysis || {}), ...newAnalysis };
+      done++;
+    } catch (e) {
+      failed++;
+      console.warn('[Gemini FAIL] ' + clip.name + ': ' + e.message);
+    }
+    if (typeof saveClientData === 'function' && activeClientId) {
+      try { saveClientData(activeClientId); } catch (e) {}
+    }
+    if (typeof renderClips === 'function') renderClips();
+    if (typeof updateStats === 'function') updateStats();
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Gemini analyzed (' + done + ')'; setTimeout(() => { if (btn) btn.textContent = '🎬 Analyze Videos with Gemini'; }, 4000); }
+  alert('Gemini analysis complete: ' + done + ' analyzed, ' + failed + ' failed.');
+}
+
+
+
 async function aiEditStoryToVideo(clipPool, opts) {
   opts = opts || {};
-  const targetDur = opts.targetDurationS || 30;
+  const minDur = opts.minDurationS || 30;
+  const maxDur = opts.maxDurationS || 45;
+  const idealDur = Math.round((minDur + maxDur) / 2);
   const hookTone  = opts.hookTone || (BRAND.hookTone || 'storyteller');
-  const brandName = (getActiveClient()||{}).name || 'this brand';
-
+  const brandName = (getActiveClient() || {}).name || 'this brand';
   if (!clipPool.length) throw new Error('No clips provided');
 
-  // Text-only context — no video seeking. Faster, more reliable, ~4x cheaper.
-  // (Multi-frame visual context can be re-added later as opt-in once base path
-  // is proven, since the underlying analysis already carries content_description.)
-  const enriched = clipPool.map((c, i) => ({
-    idx: i, c,
-    summary: {
-      idx: i,
-      name: c.name?.substring(0, 40),
-      durationS: Math.round(c.duration || 0),
-      jobCategory: clipCategory(c),
-      clipRole: c.aiAnalysis?.clipRole || null,
-      mood: c.aiAnalysis?.mood || null,
-      visualDescription: (c.aiAnalysis?.content_description || c.aiAnalysis?.suggested_clip_description || '').substring(0, 400),
-      tags: (c.aiAnalysis?.tags || []).slice(0, 6),
-      spoken: (c.transcript?.text || '').substring(0, 800),
-      sentenceEnds: c.transcript?.boundaries || [],
-    },
-    frames: [],
-  }));
+  // Read rich Gemini metadata when available; gracefully degrade to old GPT-4o fields.
+  const enriched = clipPool.map((c, i) => {
+    const a = c.aiAnalysis || {};
+    return {
+      idx: i, c,
+      summary: {
+        idx: i, name: c.name?.substring(0, 40), durationS: Math.round(c.duration || 0),
+        analyzer: a._analyzer || 'gpt-4o-text',
+        clipRole: a.clipRole || null, clipRoleConfidence: a.clipRoleConfidence ?? null,
+        mood: a.mood || null,
+        hookWorthiness: a.hookWorthiness ?? null, visualQuality: a.visualQuality ?? null,
+        contentDescription: (a.content_description || a.suggested_clip_description || '').substring(0, 400),
+        bestOverlay: a.best_text_overlay || null, suggestedHook: a.suggested_hook || null,
+        heroMoments: a.heroMoments || [], motionPeaks: a.motionPeaks || [],
+        perSecondDescription: a.perSecondDescription || [],
+        spoken: (c.transcript?.text || '').substring(0, 800),
+        sentenceEnds: c.transcript?.boundaries || [],
+      }
+    };
+  });
 
-  // Build the editor's rule book — these are the rules the AI follows
-  const rules = `You are a senior short-form video editor producing 9:16 vertical videos for "${brandName}" — Facebook, TikTok, Instagram Reels.
+  const buildPrompt = (extraInstructions) => {
+    const rules = `You are a senior short-form video editor producing 9:16 vertical videos for "${brandName}" — Facebook, TikTok, Instagram Reels.
 
 YOUR EDITORIAL CRAFT — rules you ALWAYS follow:
 
-1. OPEN ON MOTION OR ANTICIPATION. The first 1-2 seconds must show something visually compelling — water flowing, a tool engaging, a worker reaching, a problem revealing itself. Never open on setup, walking-up shots, or static establishing frames.
+1. OPEN ON MOTION OR ANTICIPATION. Pick the cut with highest hookWorthiness for the FIRST cut.
 
-2. MAINTAIN TEMPORAL & SPATIAL CONTINUITY. If clip A ends with hands reaching for a tool, clip B should show that tool in use — not a different scene at a different location. The viewer should feel like they're watching one continuous job.
+2. MAINTAIN VISUAL CONTINUITY. Use perSecondDescription[] to verify visual flow. Two cuts from the SAME clipIdx are NOT two cuts.
 
-3. CUT ON ACTION, NEVER MID-GESTURE. A pipe cracks → cut to the water flowing → cut to the operator's reaction. Don't cut while someone is mid-reach, mid-sentence, or mid-motion.
+3. CUT ON ACTION. Use motionPeaks[] timestamps as natural cut points.
 
-4. CUTS MUST RESPECT SPEECH CONTINUITY. If the worker says "now watch this..." the next clip MUST show what they're pointing to. NEVER cut to a clip whose dialogue starts mid-sentence about a different topic. Use sentenceEnds[] arrays to find natural pause points.
+4. RESPECT SPEECH CONTINUITY. trimStart/trimEnd MUST be values present in sentenceEnds[] (or 0, or clip duration). NEVER round to clean numbers.
 
-5. HOLD APPROPRIATE BEATS. Important visual reveals (the gross clog coming out, the satisfying clean pipe) get 2-3 seconds of breathing room. Process shots get 1-2 seconds. Never give a filler shot more than 1 second.
+5. NEVER USE THE SAME CLIP IN ADJACENT CUTS.
 
-6. LAND ON PAYOFF OR VISUAL REST. The last cut is the satisfying moment — clean drain, completed install, customer relief, finished worksite. Not a random ambient frame.
+6. NARRATIVE ARC: PROBLEM → PROCESS → RESULT. First cut clipRole "problem"/"context". LAST cut MUST be clipRole "result".
 
-7. HOOK COPY IS DESCRIPTIVE, NOT PROMOTIONAL. ${hookTone === 'storyteller' ? '"FLOOD on the 5th floor", "The start of a rough night"' : hookTone === 'question' ? '"Ever heard of Maintenance Rodding?"' : 'Conversational, not hype.'} NEVER write "Watch this!" or "You won't believe...".
+7. LAND ON THE HERO MOMENT. Reveal cut should land on heroMoments[] timestamp with score >= 0.8.
 
-8. CAPTIONS DESCRIBE THIS SPECIFIC MOMENT. Each cut gets its own short caption (3-7 words) that describes what's HAPPENING IN THAT CUT, not the overall video. Examples: "Cracking the cleanout", "Snake threads in", "There's the blockage", "Flow restored".
+8. CAPTIONS BRIDGE GAPS. 3-7 word caption per cut. Prefer clip's bestOverlay if it fits.
 
-9. TARGET DURATION: ${targetDur} seconds total. 4-7 cuts is the sweet spot. Each cut 2-7 seconds. The math should work out to ${targetDur}s.
+9. HOOK COPY: ${hookTone === 'storyteller' ? 'Examples: "FLOOD on the 5th floor", "The start of a rough night", "Pump froze solid overnight"' : hookTone === 'question' ? 'Examples: "Ever heard of Maintenance Rodding?"' : 'Conversational, not hype.'} NEVER write "Watch this!" or chyron-speak.
 
-10. PICK YOUR CUTS FROM THE PROVIDED CLIPS ONLY. You may use a subset — not every clip has to make it. You may use the same clip twice if necessary, but prefer variety.
+10. **CRITICAL DURATION RULE: Total duration MUST be between ${minDur} and ${maxDur} seconds. Ideal is ${idealDur}s. UNDER ${minDur}s is REJECTED — videos that short underperform on social platforms. Use 5-7 cuts averaging 5-7 seconds each. If your math gives less than ${minDur}s, ADD more cuts or LENGTHEN existing trims to safe sentence boundaries until you hit at least ${minDur}s.**
 
-For each clip you have:
-  • 3 keyframes (start / middle / end of the clip)
-  • Full spoken transcript
-  • Available sentence-end timestamps (the safe places to cut)
-  • Job category and your earlier role assessment
-
-OUTPUT FORMAT — return EXACTLY this JSON object:
-
+OUTPUT FORMAT — return EXACTLY this JSON:
 {
   "title": "4-8 word descriptive title in ${hookTone} voice",
-  "description": "1-2 sentence narrative summary of the assembled video",
-  "hook":  "First-3-second overlay text in ${hookTone} voice — under 8 words",
-  "cta":   "Last-5-second overlay text — short, brand-relevant",
-  "edits": [
-    {
-      "clipIdx": 0,
-      "trimStart": 4.20,
-      "trimEnd":   8.50,
-      "caption":   "Snake threads into main line",
-      "purpose":   "establish the problem visually"
-    },
-    ...
-  ],
-  "narrativeRationale": "1-2 sentences explaining the overall edit choice"
-}
+  "description": "1-2 sentence narrative summary",
+  "hook": "First-3-second overlay text in ${hookTone} voice — under 8 words",
+  "cta": "Last-5-second overlay text — short, brand-relevant",
+  "edits": [{ "clipIdx": 0, "trimStart": 4.20, "trimEnd": 8.50, "caption": "Pipe interior frozen solid", "purpose": "establish problem visually" }],
+  "narrativeRationale": "1-2 sentences explaining the edit choice"
+}`;
 
-CRITICAL: trimStart/trimEnd must be valid timestamps within the clip's duration AND should align with sentenceEnds[] when speech is involved. The TOTAL of (trimEnd - trimStart) across all edits should equal ${targetDur} seconds (±2s).`;
+    let body = rules + '\n\nAVAILABLE CLIPS:\n';
+    for (const e of enriched) {
+      body += `\n=== Clip ${e.idx}: ${e.summary.name} (${e.summary.durationS}s) ===\n`;
+      body += `Analyzer: ${e.summary.analyzer} | Role: ${e.summary.clipRole || '?'} (conf ${e.summary.clipRoleConfidence ?? '?'}) | Mood: ${e.summary.mood || '?'}\n`;
+      body += `HookWorthiness: ${e.summary.hookWorthiness ?? '?'} | VisualQuality: ${e.summary.visualQuality ?? '?'}\n`;
+      if (e.summary.contentDescription) body += `Visual: ${e.summary.contentDescription}\n`;
+      if (e.summary.bestOverlay) body += `BestOverlay: "${e.summary.bestOverlay}"\n`;
+      if (e.summary.heroMoments.length) {
+        body += `HeroMoments:\n`;
+        e.summary.heroMoments.forEach(h => { body += `  - t=${h.t}s (score ${h.score}): ${h.description}\n`; });
+      }
+      if (e.summary.motionPeaks.length) body += `MotionPeaks: ${e.summary.motionPeaks.map(m => `t=${m.t}s (${m.type})`).join(', ')}\n`;
+      body += `Spoken: ${e.summary.spoken || '(no speech)'}\n`;
+      if (e.summary.sentenceEnds.length) body += `SafeCutPoints: [${e.summary.sentenceEnds.map(s => s.toFixed(2)).join(', ')}]\n`;
+    }
+    body += `\n\nNow EDIT into a coherent ${idealDur}-second video (range ${minDur}-${maxDur}s). Apply the narrative arc rule and land on the hero moment. ${extraInstructions || ''} Return only the JSON.`;
+    return body;
+  };
 
-  // Build a single text prompt — no image content, fast and cheap
-  let body = rules + '\n\nAVAILABLE CLIPS:\n';
-  for (const e of enriched) {
-    body += `\n=== Clip ${e.idx}: ${e.summary.name} (${e.summary.durationS}s) ===\n`;
-    body += `Job: ${e.summary.jobCategory} | Role: ${e.summary.clipRole || 'unknown'} | Mood: ${e.summary.mood || 'unknown'}\n`;
-    if (e.summary.visualDescription) body += `Visual: ${e.summary.visualDescription}\n`;
-    if (e.summary.tags.length) body += `Tags: ${e.summary.tags.join(', ')}\n`;
-    body += `Spoken: ${e.summary.spoken || '(no speech)'}\n`;
-    if (e.summary.sentenceEnds.length) body += `Safe cut points: ${e.summary.sentenceEnds.map(s => s.toFixed(1)).join('s, ')}s\n`;
+  const callEditor = async (extraInstructions) => {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: buildPrompt(extraInstructions) }],
+        max_tokens: 1500, response_format: { type: 'json_object' }, temperature: 0.4,
+      })
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`AI editor call failed (${resp.status}): ${errText.substring(0, 200)}`);
+    }
+    const data = await resp.json();
+    return JSON.parse(data.choices[0].message.content);
+  };
+
+  // First attempt
+  let edit = await callEditor();
+  let total = (edit.edits || []).reduce((s, e) => s + (e.trimEnd - e.trimStart), 0);
+  console.log('[AI Edit] First pass: ' + total.toFixed(1) + 's, ' + edit.edits.length + ' cuts');
+
+  // Retry up to twice if duration out of range
+  let retries = 0;
+  while ((total < minDur - 1 || total > maxDur + 1) && retries < 2) {
+    retries++;
+    const need = total < minDur
+      ? `Your previous edit was ${total.toFixed(1)}s — TOO SHORT. The minimum is ${minDur}s. ADD ${(minDur + 5 - total).toFixed(1)}s by lengthening trims to next sentence boundary or adding another cut.`
+      : `Your previous edit was ${total.toFixed(1)}s — TOO LONG. The max is ${maxDur}s. SHORTEN by ${(total - maxDur + 2).toFixed(1)}s.`;
+    console.log('[AI Edit] Retry ' + retries + ': ' + need);
+    edit = await callEditor(need);
+    total = (edit.edits || []).reduce((s, e) => s + (e.trimEnd - e.trimStart), 0);
+    console.log('[AI Edit] Retry result: ' + total.toFixed(1) + 's, ' + edit.edits.length + ' cuts');
   }
-  body += `\n\nNow EDIT these clips into a coherent ${targetDur}-second video following all the editorial rules above. Return only the JSON object.`;
 
-  const content = body;
-
-  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: content }],
-      max_tokens: 1500,
-      response_format: { type: 'json_object' },
-      temperature: 0.4,
-    })
-  });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`AI editor call failed (${resp.status}): ${errText.substring(0, 200)}`);
-  }
-  const data = await resp.json();
-  const edit = JSON.parse(data.choices[0].message.content);
   // Attach the original clip references onto each edit for downstream
   edit.edits = (edit.edits || []).map(e => ({
     ...e,
     clipId: clipPool[e.clipIdx]?.id,
   })).filter(e => e.clipId);
+  edit._totalDuration = total;
+  edit._retries = retries;
   return edit;
 }
 
@@ -3364,9 +3621,9 @@ async function aiEditQueueSlot(slotIdx) {
 
   if (!confirm(`Run AI Editor on Day ${q.day} ("${q.title}")?
 
-• ${clipPool.length} clips will be sent to GPT-4o with full transcripts and 3 keyframes each.
-• Cost ~$0.04-0.08.
-• The AI will produce a real edit (cuts, trims, captions, hook, title) following editorial rules.
+• ${clipPool.length} clips analyzed by editor (uses Gemini metadata when available — richer hero moments + motion peaks + role classification).
+• Cost ~$0.02-0.05 per edit (Gemini analysis amortized across runs).
+• Output: 30-45s cut following narrative arc (problem → process → result), with auto-retry if duration out of range.
 • Existing assignments for this slot will be replaced.`)) return;
 
   // Find the row's button to update progress
@@ -4138,6 +4395,11 @@ function renderBrandForm() {
         <label>AI API Key (per-client)</label>
         <input type="password" id="bf-ai-key" value="${escapeHtml(c.ai.key)}" placeholder="sk-...">
       </div>
+      <div class="brand-form-row full">
+        <label>Gemini API Key (for video analysis — separate from primary AI key)</label>
+        <input type="password" id="bf-gemini-key" value="${escapeHtml(c.ai.geminiKey || '')}" placeholder="AIzaSy...">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Optional. Enables native video understanding for richer cut decisions. Get one at aistudio.google.com/apikey.</div>
+      </div>
     </div>
 
     <div class="brand-actions">
@@ -4189,6 +4451,7 @@ function saveBrandForm() {
   c.gapi.connected = !!(c.gapi.key && c.gapi.clientId);
   c.ai.provider   = get('bf-ai-provider') || 'openai';
   c.ai.key        = get('bf-ai-key') || '';
+  c.ai.geminiKey  = get('bf-gemini-key') || '';
   c.ai.enabled    = c.ai.provider !== 'none' && !!c.ai.key;
   saveClients();
   renderBrandClientList();
