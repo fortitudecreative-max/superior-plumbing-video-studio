@@ -3494,128 +3494,126 @@ async function aiEditStoryToVideo(clipPool, opts) {
   const minDur = opts.minDurationS || 30;
   const maxDur = opts.maxDurationS || 45;
   const idealDur = Math.round((minDur + maxDur) / 2);
-  const hookTone  = opts.hookTone || (BRAND.hookTone || 'storyteller');
+  const hookTone = opts.hookTone || (BRAND.hookTone || 'storyteller');
   const brandName = (getActiveClient() || {}).name || 'this brand';
   if (!clipPool.length) throw new Error('No clips provided');
 
-  // Read rich Gemini metadata when available; gracefully degrade to old GPT-4o fields.
-  const enriched = clipPool.map((c, i) => {
+  // Editor pass now runs entirely on Gemini 2.5 Flash — removes OpenAI quota dependency.
+  // Lean prompt design: list clips with role + hookWorthiness only. No rich metadata in prompt.
+  // Post-process via snapTrimsToSentenceBoundaries to handle speech-respect.
+  // CRITICAL: maxOutputTokens MUST be ~8000. Lower values cause JSON truncation at random positions.
+
+  const apiKey = CONFIG.ai.geminiKey || (CONFIG.ai.provider === 'gemini' ? CONFIG.ai.key : null);
+  if (!apiKey) throw new Error('No Gemini API key configured. Set it in Setup → Gemini API Key.');
+
+  const clipLines = clipPool.map((c, i) => {
     const a = c.aiAnalysis || {};
-    return {
-      idx: i, c,
-      summary: {
-        idx: i, name: c.name?.substring(0, 40), durationS: Math.round(c.duration || 0),
-        analyzer: a._analyzer || 'gpt-4o-text',
-        clipRole: a.clipRole || null, clipRoleConfidence: a.clipRoleConfidence ?? null,
-        mood: a.mood || null,
-        hookWorthiness: a.hookWorthiness ?? null, visualQuality: a.visualQuality ?? null,
-        contentDescription: (a.content_description || a.suggested_clip_description || '').substring(0, 400),
-        bestOverlay: a.best_text_overlay || null, suggestedHook: a.suggested_hook || null,
-        heroMoments: a.heroMoments || [], motionPeaks: a.motionPeaks || [],
-        perSecondDescription: a.perSecondDescription || [],
-        spoken: (c.transcript?.text || '').substring(0, 800),
-        sentenceEnds: c.transcript?.boundaries || [],
-      }
-    };
-  });
+    const desc = (a.suggested_clip_title || a.content_description || c.name || '').substring(0, 60);
+    return `${i}: "${desc.replace(/"/g, "'")}" (${Math.round(c.duration||0)}s, role=${a.clipRole || '?'}, hookWorth=${a.hookWorthiness?.toFixed(1) || '?'})`;
+  }).join('\n');
 
-  const buildPrompt = (extraInstructions) => {
-    const rules = `You are a senior short-form video editor producing 9:16 vertical videos for "${brandName}" — Facebook, TikTok, Instagram Reels.
+  const buildPrompt = (extra) => `Edit a ${idealDur}-second (${minDur}-${maxDur}s) vertical Reel for "${brandName}" from these clips:
 
-YOUR EDITORIAL CRAFT — rules you ALWAYS follow:
+${clipLines}
 
-1. OPEN ON MOTION OR ANTICIPATION. Pick the cut with highest hookWorthiness for the FIRST cut.
+Rules:
+- Pick 5-7 clips. Each cut 4-8 seconds.
+- First cut: role=problem or role=context. Last cut MUST be role=result.
+- Never same clip in adjacent cuts.
+- Hook: STRICTLY under 8 words. ${hookTone} voice — descriptive moment-framing, never "Watch this!".
+- Captions: STRICTLY 3-7 words each. Action-verb phrases like "Snake threads in", "Frozen solid", "Backflow locked in". Never essay-style sentences.
+- Total duration MUST be ${minDur}-${maxDur}s.
+${extra || ''}
+Output JSON only.`;
 
-2. MAINTAIN VISUAL CONTINUITY. Use perSecondDescription[] to verify visual flow. Two cuts from the SAME clipIdx are NOT two cuts.
-
-3. CUT ON ACTION. Use motionPeaks[] timestamps as natural cut points.
-
-4. RESPECT SPEECH CONTINUITY. trimStart/trimEnd MUST be values present in sentenceEnds[] (or 0, or clip duration). NEVER round to clean numbers.
-
-5. NEVER USE THE SAME CLIP IN ADJACENT CUTS.
-
-6. NARRATIVE ARC: PROBLEM → PROCESS → RESULT. First cut clipRole "problem"/"context". LAST cut MUST be clipRole "result".
-
-7. LAND ON THE HERO MOMENT. Reveal cut should land on heroMoments[] timestamp with score >= 0.8.
-
-8. CAPTIONS BRIDGE GAPS. 3-7 word caption per cut. Prefer clip's bestOverlay if it fits.
-
-9. HOOK COPY: ${hookTone === 'storyteller' ? 'Examples: "FLOOD on the 5th floor", "The start of a rough night", "Pump froze solid overnight"' : hookTone === 'question' ? 'Examples: "Ever heard of Maintenance Rodding?"' : 'Conversational, not hype.'} NEVER write "Watch this!" or chyron-speak.
-
-10. **CRITICAL DURATION RULE: Total duration MUST be between ${minDur} and ${maxDur} seconds. Ideal is ${idealDur}s. UNDER ${minDur}s is REJECTED — videos that short underperform on social platforms. Use 5-7 cuts averaging 5-7 seconds each. If your math gives less than ${minDur}s, ADD more cuts or LENGTHEN existing trims to safe sentence boundaries until you hit at least ${minDur}s.**
-
-OUTPUT FORMAT — return EXACTLY this JSON:
-{
-  "title": "4-8 word descriptive title in ${hookTone} voice",
-  "description": "1-2 sentence narrative summary",
-  "hook": "First-3-second overlay text in ${hookTone} voice — under 8 words",
-  "cta": "Last-5-second overlay text — short, brand-relevant",
-  "edits": [{ "clipIdx": 0, "trimStart": 4.20, "trimEnd": 8.50, "caption": "Pipe interior frozen solid", "purpose": "establish problem visually" }],
-  "narrativeRationale": "1-2 sentences explaining the edit choice"
-}`;
-
-    let body = rules + '\n\nAVAILABLE CLIPS:\n';
-    for (const e of enriched) {
-      body += `\n=== Clip ${e.idx}: ${e.summary.name} (${e.summary.durationS}s) ===\n`;
-      body += `Analyzer: ${e.summary.analyzer} | Role: ${e.summary.clipRole || '?'} (conf ${e.summary.clipRoleConfidence ?? '?'}) | Mood: ${e.summary.mood || '?'}\n`;
-      body += `HookWorthiness: ${e.summary.hookWorthiness ?? '?'} | VisualQuality: ${e.summary.visualQuality ?? '?'}\n`;
-      if (e.summary.contentDescription) body += `Visual: ${e.summary.contentDescription}\n`;
-      if (e.summary.bestOverlay) body += `BestOverlay: "${e.summary.bestOverlay}"\n`;
-      if (e.summary.heroMoments.length) {
-        body += `HeroMoments:\n`;
-        e.summary.heroMoments.forEach(h => { body += `  - t=${h.t}s (score ${h.score}): ${h.description}\n`; });
-      }
-      if (e.summary.motionPeaks.length) body += `MotionPeaks: ${e.summary.motionPeaks.map(m => `t=${m.t}s (${m.type})`).join(', ')}\n`;
-      body += `Spoken: ${e.summary.spoken || '(no speech)'}\n`;
-      if (e.summary.sentenceEnds.length) body += `SafeCutPoints: [${e.summary.sentenceEnds.map(s => s.toFixed(2)).join(', ')}]\n`;
-    }
-    body += `\n\nNow EDIT into a coherent ${idealDur}-second video (range ${minDur}-${maxDur}s). Apply the narrative arc rule and land on the hero moment. ${extraInstructions || ''} Return only the JSON.`;
-    return body;
+  const schema = {
+    type: 'object',
+    properties: {
+      hook: { type: 'string' },
+      title: { type: 'string' },
+      cta: { type: 'string' },
+      edits: { type: 'array', items: { type: 'object', properties: {
+        clipIdx: { type: 'integer' },
+        trimStart: { type: 'number' },
+        trimEnd: { type: 'number' },
+        caption: { type: 'string' }
+      }, required: ['clipIdx', 'trimStart', 'trimEnd', 'caption'] } }
+    },
+    required: ['hook', 'title', 'edits']
   };
 
-  const callEditor = async (extraInstructions) => {
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  const callEditor = async (extra) => {
+    const resp = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CONFIG.ai.key}` },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: buildPrompt(extraInstructions) }],
-        max_tokens: 1500, response_format: { type: 'json_object' }, temperature: 0.4,
+        contents: [{ parts: [{ text: buildPrompt(extra) }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.3, maxOutputTokens: 8000 }
       })
     });
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`AI editor call failed (${resp.status}): ${errText.substring(0, 200)}`);
-    }
+    if (!resp.ok) throw new Error('Gemini editor call failed (' + resp.status + '): ' + (await resp.text()).substring(0, 200));
     const data = await resp.json();
-    return JSON.parse(data.choices[0].message.content);
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const finishReason = data.candidates?.[0]?.finishReason;
+    if (!text) throw new Error('Gemini editor returned no text (finishReason: ' + finishReason + ')');
+    if (finishReason === 'MAX_TOKENS') console.warn('[Gemini Editor] hit MAX_TOKENS at 8000');
+    return JSON.parse(text);
   };
 
-  // First attempt
   let edit = await callEditor();
   let total = (edit.edits || []).reduce((s, e) => s + (e.trimEnd - e.trimStart), 0);
-  console.log('[AI Edit] First pass: ' + total.toFixed(1) + 's, ' + edit.edits.length + ' cuts');
+  console.log('[AI Edit/Gemini] First pass: ' + total.toFixed(1) + 's, ' + edit.edits.length + ' cuts');
 
-  // Retry up to twice if duration out of range
   let retries = 0;
   while ((total < minDur - 1 || total > maxDur + 1) && retries < 2) {
     retries++;
     const need = total < minDur
-      ? `Your previous edit was ${total.toFixed(1)}s — TOO SHORT. The minimum is ${minDur}s. ADD ${(minDur + 5 - total).toFixed(1)}s by lengthening trims to next sentence boundary or adding another cut.`
-      : `Your previous edit was ${total.toFixed(1)}s — TOO LONG. The max is ${maxDur}s. SHORTEN by ${(total - maxDur + 2).toFixed(1)}s.`;
-    console.log('[AI Edit] Retry ' + retries + ': ' + need);
+      ? `Previous edit was ${total.toFixed(1)}s — TOO SHORT (min ${minDur}s). Add time.`
+      : `Previous edit was ${total.toFixed(1)}s — TOO LONG (max ${maxDur}s). Shorten.`;
+    console.log('[AI Edit/Gemini] Retry ' + retries + ': ' + need);
     edit = await callEditor(need);
     total = (edit.edits || []).reduce((s, e) => s + (e.trimEnd - e.trimStart), 0);
-    console.log('[AI Edit] Retry result: ' + total.toFixed(1) + 's, ' + edit.edits.length + ' cuts');
   }
 
-  // Attach the original clip references onto each edit for downstream
+  // Post-process: snap trim points to nearest sentence boundary (no mid-sentence cuts where avoidable)
+  if (typeof snapTrimsToSentenceBoundaries === 'function') {
+    edit = snapTrimsToSentenceBoundaries(edit, clipPool);
+  }
+
   edit.edits = (edit.edits || []).map(e => ({
     ...e,
     clipId: clipPool[e.clipIdx]?.id,
   })).filter(e => e.clipId);
   edit._totalDuration = total;
   edit._retries = retries;
+  edit._editorProvider = 'gemini-2.5-flash';
+  edit.description = edit.description || edit.title || '';
+  edit.narrativeRationale = edit.narrativeRationale || 'Gemini-edited';
+  return edit;
+}
+
+// snapTrimsToSentenceBoundaries: post-process every cut's trimStart/trimEnd to snap to
+// the nearest entry in clip.transcript.boundaries within ±1s tolerance. Skips clips with
+// no transcript. Reverts on a snap that produces a too-short cut.
+function snapTrimsToSentenceBoundaries(edit, clipPool) {
+  const TOLERANCE = 1.0;
+  let snapped = 0;
+  edit.edits = edit.edits.map((e, i) => {
+    const clip = clipPool[e.clipIdx];
+    if (!clip?.transcript?.boundaries?.length) return e;
+    const dur = clip.duration || 9999;
+    const candidates = [0, ...clip.transcript.boundaries, dur].filter(b => b >= 0 && b <= dur);
+    const findNearest = t => candidates.reduce((best, b) => Math.abs(b - t) < Math.abs(best - t) ? b : best, candidates[0]);
+    const origStart = e.trimStart, origEnd = e.trimEnd;
+    let trimStart = origStart, trimEnd = origEnd;
+    const candStart = findNearest(origStart);
+    const candEnd = findNearest(origEnd);
+    if (Math.abs(candStart - origStart) <= TOLERANCE) { trimStart = Math.round(candStart * 100) / 100; if (trimStart !== origStart) snapped++; }
+    if (Math.abs(candEnd - origEnd) <= TOLERANCE) { trimEnd = Math.round(candEnd * 100) / 100; if (trimEnd !== origEnd) snapped++; }
+    if (trimEnd - trimStart < 1.0) return e; // revert if snap collapsed cut
+    return { ...e, trimStart, trimEnd };
+  });
+  if (snapped > 0) console.log('[Snap] Adjusted ' + snapped + ' trim points to sentence boundaries');
   return edit;
 }
 
@@ -3971,6 +3969,23 @@ function saveToQueue() {
 
 function loadQueue(i) {
   const q = queue[i]; curQIdx = i;
+  // Reconstruct missing synthetic AI Edit template from queue.segs (fixes refresh-loses-template bug)
+  if (q.tmplUsed && q.tmplUsed.startsWith('ai-edit-') && !TEMPLATES.find(x => x.id === q.tmplUsed) && q.segs && Object.keys(q.segs).length) {
+    const sortedKeys = Object.keys(q.segs).sort((a, b) => parseInt(a) - parseInt(b));
+    const synthSegments = sortedKeys.map(k => {
+      const s = q.segs[k];
+      return {
+        name: s.purpose || ('Cut ' + (parseInt(k) + 1)),
+        dur: Math.max(0.5, Math.round((s.trimEnd - s.trimStart) * 10) / 10),
+        color: ['#d60000','#10b981','#f59e0b','#3b82f6','#8b5cf6','#ec4899','#14b8a6'][parseInt(k) % 7],
+        desc: s.caption || ''
+      };
+    });
+    TEMPLATES.push({
+      id: q.tmplUsed, name: 'AI Edit', dur: synthSegments.reduce((s, x) => s + x.dur, 0).toFixed(0) + 's',
+      color: 'var(--primary)', icon: '🧠', segments: synthSegments, isAIEdit: true
+    });
+  }
   const t = TEMPLATES.find(x=>x.id===(q.tmplUsed||q.tmpl));
   if (t) {
     selTmpl=t; segClips=q.segs?{...q.segs}:{};
