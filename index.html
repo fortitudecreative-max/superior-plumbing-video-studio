@@ -1174,6 +1174,8 @@ function launchApp() {
   renderStoriesPanel();
   updateAnalyzeAllButton();
   updateStats();
+  // Try to silently restore the previously-granted local folder handle
+  tryRestoreLocalFolder();
 }
 
 // ═══════════════════════════════════════
@@ -1186,6 +1188,123 @@ function launchApp() {
 // rate limits. Per-session permission grant; user must click the button each
 // session, but no popup-blocker issues since it's an explicit user gesture.
 
+// ── PERSISTENT LOCAL FOLDER HANDLES (IndexedDB) ─────────
+// Chrome's File System Access API allows FileSystemDirectoryHandle objects to
+// be stored in IndexedDB so the user doesn't have to re-grant access every
+// session. After the first grant, permission state typically stays 'granted'
+// for the origin (until the user clears site data). When it lapses to 'prompt',
+// we surface a one-click "Resume" affordance — still a user gesture, but no
+// folder picker dance.
+
+function _spvsOpenHandleDb() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('spvs-fs-handles', 1);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+    };
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function persistDirHandle(handle) {
+  try {
+    const db = await _spvsOpenHandleDb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction('handles', 'readwrite');
+      const r = tx.objectStore('handles').put(handle, 'localDir');
+      r.onsuccess = () => res();
+      r.onerror = () => rej(r.error);
+    });
+  } catch (e) { console.warn('persistDirHandle failed:', e); }
+}
+
+async function restoreDirHandle() {
+  try {
+    const db = await _spvsOpenHandleDb();
+    return await new Promise((res) => {
+      const tx = db.transaction('handles', 'readonly');
+      const r = tx.objectStore('handles').get('localDir');
+      r.onsuccess = () => res(r.result || null);
+      r.onerror = () => res(null);
+    });
+  } catch (e) { return null; }
+}
+
+async function reattachLocalFolder(dirHandle) {
+  async function* iterateVideos(handle, depth = 0) {
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'file') {
+        if (/\.(mp4|mov|m4v|webm)$/i.test(entry.name)) yield entry;
+      } else if (entry.kind === 'directory' && depth < 3) {
+        yield* iterateVideos(entry, depth + 1);
+      }
+    }
+  }
+  const existingByName = new Map();
+  clips.forEach(c => { if (c.name) existingByName.set(c.name, c); });
+  let restored = 0;
+  try {
+    for await (const entry of iterateVideos(dirHandle)) {
+      const existing = existingByName.get(entry.name);
+      if (existing) {
+        existing.fileHandle = entry;
+        existing.source = 'local';
+        existing.url = null;
+        existing.loaded = false;
+        restored++;
+      }
+    }
+  } catch (e) { console.warn('reattachLocalFolder iteration error:', e); }
+  if (typeof renderClips === 'function') renderClips();
+  if (typeof updateStats === 'function') updateStats();
+  return restored;
+}
+
+async function tryRestoreLocalFolder() {
+  const dirHandle = await restoreDirHandle();
+  if (!dirHandle) return false;
+  try {
+    const perm = await dirHandle.queryPermission({ mode: 'read' });
+    if (perm === 'granted') {
+      const restored = await reattachLocalFolder(dirHandle);
+      console.log('[Local Folder] Silently restored ' + restored + ' file handles from IDB');
+      const btn = document.getElementById('local-folder-btn');
+      if (btn && restored > 0) {
+        btn.textContent = '✓ ' + restored + ' local files re-attached';
+        setTimeout(() => { btn.textContent = '💾 Open Local Folder'; }, 4000);
+      }
+      return true;
+    } else if (perm === 'prompt') {
+      console.log('[Local Folder] Permission expired; click button to resume');
+      const btn = document.getElementById('local-folder-btn');
+      if (btn) {
+        btn.textContent = '🔓 Resume Local Folder (1 click)';
+        // Wire up a one-click resume that calls requestPermission inside the user gesture
+        btn.onclick = async () => {
+          try {
+            const p = await dirHandle.requestPermission({ mode: 'read' });
+            if (p === 'granted') {
+              const n = await reattachLocalFolder(dirHandle);
+              btn.textContent = '✓ ' + n + ' files re-attached';
+              setTimeout(() => { btn.textContent = '💾 Open Local Folder'; btn.onclick = null; }, 3000);
+            } else {
+              btn.textContent = '⚠️ Permission denied';
+              setTimeout(() => { btn.textContent = '💾 Open Local Folder'; btn.onclick = null; }, 3000);
+            }
+          } catch (e) {
+            btn.textContent = '⚠️ ' + (e.message || e).substring(0, 30);
+            setTimeout(() => { btn.textContent = '💾 Open Local Folder'; btn.onclick = null; }, 3000);
+          }
+        };
+      }
+      return false;
+    }
+  } catch (e) { console.warn('tryRestoreLocalFolder failed:', e); }
+  return false;
+}
+
 async function openLocalFolder() {
   if (!('showDirectoryPicker' in window)) {
     alert('Your browser does not support local folder access. Use Chrome, Edge, or another Chromium-based browser.');
@@ -1197,6 +1316,8 @@ async function openLocalFolder() {
   let dirHandle;
   try {
     dirHandle = await window.showDirectoryPicker({ mode: 'read', id: 'spvs-local-folder' });
+    // Persist the handle to IDB so refreshes don't require re-picking the folder
+    await persistDirHandle(dirHandle);
   } catch (e) {
     btn.textContent = '💾 Open Local Folder';
     btn.disabled = false;
@@ -4053,6 +4174,17 @@ async function playPreview() {
   const v = document.getElementById('pvid');
   if (!selTmpl||!Object.keys(segClips).length) return;
   if (playing) { v.pause(); playing=false; document.getElementById('play-btn').textContent='▶ Play'; clearTimeout(playTimer); return; }
+  // Surface a clear error when local-source clips are missing file handles
+  // (typical after a page refresh before "Open Local Folder" is granted).
+  // Without this check, preview would fail silently.
+  const needsLocalAccess = Object.values(segClips).some(s => {
+    const cl = clips.find(c => c.id === s.clipId);
+    return cl && cl.source === 'local' && !cl.fileHandle;
+  });
+  if (needsLocalAccess) {
+    alert('Preview needs local folder access.\n\nClick "Open Local Folder" in the left column (or "Resume Local Folder" if that\'s what the button says), grant permission, then click Play again.\n\nYour grant is now persisted across refreshes thanks to IndexedDB — you should only need to re-grant after clearing site data.');
+    return;
+  }
   // Safety net: ensure all assigned clips have blob URLs before starting
   const btn = document.getElementById('play-btn');
   btn.textContent = '⏳ Loading…';
