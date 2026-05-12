@@ -224,6 +224,10 @@
   .tl-clip-name { font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tl-clip-trim { font-size: 9px; color: var(--text-muted); }
   .tl-clip-rm { background: none; border: none; color: var(--red); cursor: pointer; font-size: 12px; padding: 2px; }
+.tl-cut-btn{background:rgba(55,138,221,0.18);border:1px solid #378add;color:#5bb0f0;padding:2px 6px;border-radius:4px;font-size:12px;cursor:pointer;line-height:1;}
+.tl-cut-btn.tl-swap{background:rgba(29,158,117,0.18);border-color:#1d9e75;color:#5dcaa5;}
+.tl-cut-btn:hover{filter:brightness(1.3);}
+.tl-cut-btns{display:flex;gap:3px;margin-top:4px;}
   .tl-trim { margin-top: 6px; }
   .tl-trim-row { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
   .tl-trim-row label { font-size: 9px; color: var(--text-muted); width: 20px; }
@@ -1974,7 +1978,7 @@ function renderTL() {
     return `<div class="tl-seg" id="seg-${i}" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="dropSeg(event,${i})">
       <div class="tl-seg-head"><span class="tl-seg-name" style="color:${s.color}">${s.name}</span><span class="tl-seg-dur">${s.dur}s</span></div>
       <div class="tl-drop ${cl?'filled':''}">
-        ${cl ? `<div class="tl-clip-in"><video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video><div class="tl-clip-meta"><div class="tl-clip-name">${cl.name}</div><div class="tl-clip-trim">${fmtT(cd.trimStart)} – ${fmtT(cd.trimEnd)}</div></div><button class="tl-clip-rm" onclick="rmSeg(${i})">✕</button></div>
+        ${cl ? `<div class="tl-clip-in"><video src="${cl.url}" muted preload="metadata" onloadeddata="this.currentTime=1"></video><div class="tl-clip-meta"><div class="tl-clip-name">${cl.name}</div><div class="tl-clip-trim">${fmtT(cd.trimStart)} – ${fmtT(cd.trimEnd)}</div></div><div class="tl-cut-btns"><button class="tl-cut-btn" title="Regenerate this cut" onclick="regenerateCutInSlot(${i})">↻</button><button class="tl-cut-btn tl-swap" title="Swap to different clip" onclick="swapCutClip(${i})">⇄</button><button class="tl-clip-rm" onclick="rmSeg(${i})" style="position:static;">✕</button></div></div>
         <div class="tl-trim">
           <div class="tl-trim-row"><label>In</label><input type="range" min="0" max="${Math.floor(cl.duration*100)}" value="${Math.floor(cd.trimStart*100)}" oninput="setTrim(${i},'s',this.value/100)"><span class="tv">${fmtT(cd.trimStart)}</span></div>
           <div class="tl-trim-row"><label>Out</label><input type="range" min="0" max="${Math.floor(cl.duration*100)}" value="${Math.floor(cd.trimEnd*100)}" oninput="setTrim(${i},'e',this.value/100)"><span class="tv">${fmtT(cd.trimEnd)}</span></div>
@@ -2184,6 +2188,91 @@ function dropSeg(e, i) {
 }
 
 function rmSeg(i) { delete segClips[i]; renderTL(); updPreview(); }
+
+// ─── PER-CUT CONTROLS ────────────────────────────────────────
+// Regenerate: cycle to a different hero moment in the same clip, or shift trim if no alternatives.
+// Swap: open a modal showing alternative clips matching this cut's clipRole; user picks one.
+// Both update segClips[i] and re-render. Save to Queue is the existing mechanism for persistence.
+
+function regenerateCutInSlot(i) {
+  const cd = segClips[i];
+  if (!cd) return;
+  const cl = clips.find(c => c.id === cd.clipId);
+  if (!cl) return;
+  const heroMoments = cl.aiAnalysis?.heroMoments || [];
+  const dur = cd.trimEnd - cd.trimStart;
+  const currentMid = (cd.trimStart + cd.trimEnd) / 2;
+  const altHero = heroMoments.find(h => Math.abs(h.t - currentMid) > 2);
+  if (altHero) {
+    const newStart = Math.max(0, altHero.t - dur / 2);
+    const newEnd = Math.min(cl.duration, newStart + dur);
+    segClips[i] = { ...cd, trimStart: Math.round(newStart * 100) / 100, trimEnd: Math.round(newEnd * 100) / 100, caption: altHero.description?.substring(0, 50) || cd.caption };
+    console.log('[Regenerate] cut ' + i + ' → hero moment at t=' + altHero.t + 's');
+  } else {
+    const maxStart = Math.max(0, cl.duration - dur);
+    let newStart = (cd.trimStart + 3) % (maxStart + 1);
+    if (newStart < 0.1) newStart = 0;
+    const newEnd = newStart + dur;
+    segClips[i] = { ...cd, trimStart: Math.round(newStart * 100) / 100, trimEnd: Math.round(newEnd * 100) / 100 };
+    console.log('[Regenerate] cut ' + i + ' → shifted trim by 3s');
+  }
+  renderTL();
+  updPreview();
+}
+
+function swapCutClip(i) {
+  const cd = segClips[i];
+  if (!cd) return;
+  const currentClip = clips.find(c => c.id === cd.clipId);
+  if (!currentClip) return;
+  const currentRole = currentClip.aiAnalysis?.clipRole;
+  const alternatives = clips.filter(c => c.id !== cd.clipId && c.aiAnalysis?.clipRole === currentRole && c.duration > 1).slice(0, 12);
+  if (alternatives.length === 0) {
+    alert('No alternative clips found for role: ' + (currentRole || 'unknown'));
+    return;
+  }
+  const modal = document.createElement('div');
+  modal.id = 'swap-modal-' + i;
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  const items = alternatives.map(c => `
+    <div onclick="applySwap(${i}, '${c.id}')" style="border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:8px;cursor:pointer;" onmouseover="this.style.background='#222'" onmouseout="this.style.background='transparent'">
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px;color:#e8e8e8;">${(c.aiAnalysis?.suggested_clip_title || c.name).substring(0, 60).replace(/</g, '&lt;')}</div>
+      <div style="font-size:11px;color:#aaa;">${Math.round(c.duration)}s · mood: ${c.aiAnalysis?.mood || '?'} · hookWorth: ${c.aiAnalysis?.hookWorthiness?.toFixed(2) || '?'}</div>
+    </div>
+  `).join('');
+  modal.innerHTML = `
+    <div style="background:#1a1a1a;border-radius:8px;padding:20px;max-width:600px;width:100%;max-height:80vh;overflow-y:auto;color:#e8e8e8;font-family:sans-serif;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:16px;">Swap clip for cut ${i + 1}</h3>
+        <button onclick="document.getElementById('swap-modal-${i}').remove()" style="background:none;border:none;color:#888;font-size:24px;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <div style="font-size:12px;color:#888;margin-bottom:12px;">Role: <span style="color:#5dcaa5;">${currentRole || 'unknown'}</span> · ${alternatives.length} alternatives in your library</div>
+      ${items}
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function applySwap(i, newClipId) {
+  const newClip = clips.find(c => c.id === newClipId);
+  const oldCd = segClips[i];
+  if (!newClip || !oldCd) return;
+  const desiredDur = oldCd.trimEnd - oldCd.trimStart;
+  const hero = newClip.aiAnalysis?.heroMoments?.[0];
+  const start = hero ? Math.max(0, hero.t - 1) : 0;
+  const end = Math.min(newClip.duration, start + desiredDur);
+  segClips[i] = {
+    clipId: newClipId,
+    trimStart: Math.round(start * 100) / 100,
+    trimEnd: Math.round(end * 100) / 100,
+    caption: newClip.aiAnalysis?.best_text_overlay || oldCd.caption,
+    purpose: oldCd.purpose
+  };
+  document.getElementById('swap-modal-' + i)?.remove();
+  renderTL();
+  updPreview();
+  console.log('[Swap] cut ' + i + ' → ' + newClip.name);
+}
 
 function setTrim(i,type,val) {
   if (!segClips[i]) return;
