@@ -3713,28 +3713,54 @@ Output JSON only.`;
   return edit;
 }
 
-// snapTrimsToSentenceBoundaries: post-process every cut's trimStart/trimEnd to snap to
-// the nearest entry in clip.transcript.boundaries within ±1s tolerance. Skips clips with
-// no transcript. Reverts on a snap that produces a too-short cut.
+// snapTrimsToSentenceBoundaries: HARD-snap every cut's trimStart/trimEnd to the
+// nearest entry in clip.transcript.boundaries — no tolerance. Trim points always
+// land on a real sentence boundary so playback captions follow natural dialogue
+// instead of starting/ending mid-sentence. If hard-snap collapses a cut to <2s,
+// try expanding by snapping to the next valid boundary instead of reverting.
 function snapTrimsToSentenceBoundaries(edit, clipPool) {
-  const TOLERANCE = 1.0;
   let snapped = 0;
   edit.edits = edit.edits.map((e, i) => {
     const clip = clipPool[e.clipIdx];
     if (!clip?.transcript?.boundaries?.length) return e;
     const dur = clip.duration || 9999;
-    const candidates = [0, ...clip.transcript.boundaries, dur].filter(b => b >= 0 && b <= dur);
-    const findNearest = t => candidates.reduce((best, b) => Math.abs(b - t) < Math.abs(best - t) ? b : best, candidates[0]);
+    const candidates = [0, ...clip.transcript.boundaries, dur]
+      .filter(b => b >= 0 && b <= dur)
+      .sort((a, b) => a - b);
+    if (candidates.length < 2) return e;
+
+    const findNearest = t => candidates.reduce(
+      (best, b) => Math.abs(b - t) < Math.abs(best - t) ? b : best,
+      candidates[0]
+    );
+
     const origStart = e.trimStart, origEnd = e.trimEnd;
-    let trimStart = origStart, trimEnd = origEnd;
-    const candStart = findNearest(origStart);
-    const candEnd = findNearest(origEnd);
-    if (Math.abs(candStart - origStart) <= TOLERANCE) { trimStart = Math.round(candStart * 100) / 100; if (trimStart !== origStart) snapped++; }
-    if (Math.abs(candEnd - origEnd) <= TOLERANCE) { trimEnd = Math.round(candEnd * 100) / 100; if (trimEnd !== origEnd) snapped++; }
-    if (trimEnd - trimStart < 1.0) return e; // revert if snap collapsed cut
+    let trimStart = Math.round(findNearest(origStart) * 100) / 100;
+    let trimEnd = Math.round(findNearest(origEnd) * 100) / 100;
+
+    // If hard-snap collapsed/inverted the cut, try expanding to valid boundaries
+    if (trimEnd - trimStart < 2.0) {
+      // Prefer expanding END forward to next boundary
+      const afterStart = candidates.find(b => b > trimStart + 0.5);
+      if (afterStart && afterStart - trimStart >= 2.0 && afterStart <= dur) {
+        trimEnd = Math.round(afterStart * 100) / 100;
+      } else {
+        // Else expand START backward to previous boundary
+        const beforeEnd = [...candidates].reverse().find(b => b < trimEnd - 0.5);
+        if (beforeEnd != null && trimEnd - beforeEnd >= 2.0 && beforeEnd >= 0) {
+          trimStart = Math.round(beforeEnd * 100) / 100;
+        } else {
+          // No valid pair — revert to original to preserve at least some content
+          console.warn('[Hard Snap] Cut ' + i + ' on clip ' + e.clipIdx + ': no valid boundary pair, reverting');
+          return e;
+        }
+      }
+    }
+
+    if (trimStart !== origStart || trimEnd !== origEnd) snapped++;
     return { ...e, trimStart, trimEnd };
   });
-  if (snapped > 0) console.log('[Snap] Adjusted ' + snapped + ' trim points to sentence boundaries');
+  if (snapped > 0) console.log('[Hard Snap] Aligned ' + snapped + ' trim points to actual sentence boundaries');
   return edit;
 }
 
@@ -3797,6 +3823,86 @@ function applyAIEditToSlot(slotIdx, edit) {
 }
 
 // Per-slot AI edit — wraps everything together
+// Filter a clipPool down to clips that share topical signal with the
+// highest-hookWorthiness anchor clip. This is the canonical fix for the
+// "AI is stitching clips from different jobs into one video" failure mode.
+// By requiring all clips in the pool to share keywords + jobCategory with
+// the strongest opener, the editor gets a coherent pool to work with.
+function filterPoolByTopicSimilarity(pool, opts) {
+  opts = opts || {};
+  const targetCount = opts.targetCount || 6;
+  if (!pool || pool.length <= 3) return pool;
+
+  const STOPWORDS = new Set(['the','a','an','and','or','of','to','in','on','at','with','from','by','for','is','are','was','were','this','that','these','those','your','our','their','its','it','as','be','has','have','had','do','does','did','can','will','would','should','may','might','must','plumbing','plumber','system','clip','video','footage','shows','showing','being','one','some','any','all','here','there','very','really','just','more','most','well','also','still','only','than','then','when','where','what','which','about','into','over','under','before','after','through','during','while','because','since']);
+
+  function extractKeywords(clip) {
+    const a = clip.aiAnalysis || {};
+    const text = [
+      a.suggested_clip_title || '',
+      (a.tags || []).join(' '),
+      a.content_description || '',
+      a.best_text_overlay || ''
+    ].join(' ').toLowerCase();
+    const tokens = text.split(/[^a-z0-9]+/).filter(t => t.length > 2 && !STOPWORDS.has(t));
+    return new Set(tokens);
+  }
+
+  // Anchor: highest hookWorthiness, fallback to first
+  const anchor = pool.reduce((best, c) => {
+    const bestScore = best.aiAnalysis?.hookWorthiness ?? 0;
+    const cScore = c.aiAnalysis?.hookWorthiness ?? 0;
+    return cScore > bestScore ? c : best;
+  }, pool[0]);
+
+  const anchorKw = extractKeywords(anchor);
+  const anchorCat = anchor.aiAnalysis?.jobCategory || '';
+
+  const scored = pool.map(clip => {
+    if (clip.id === anchor.id) return { clip, score: 999, kwOverlap: 0, catMatch: true };
+    const clipKw = extractKeywords(clip);
+    let overlap = 0;
+    for (const kw of clipKw) if (anchorKw.has(kw)) overlap++;
+    const union = new Set([...anchorKw, ...clipKw]).size;
+    const jaccard = union > 0 ? overlap / union : 0;
+    const catMatch = (clip.aiAnalysis?.jobCategory || '') === anchorCat && anchorCat !== '' && anchorCat !== 'Unclassified';
+    const score = jaccard + (catMatch ? 0.3 : 0);
+    return { clip, score, kwOverlap: overlap, catMatch };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Initial filter: top N by topic score
+  let filtered = scored.slice(0, targetCount);
+
+  // Ensure at least one result-role clip remains so narrative arc has a landing
+  const hasResult = filtered.some(x => x.clip.aiAnalysis?.clipRole === 'result');
+  if (!hasResult) {
+    const remaining = scored.slice(targetCount);
+    const bestResult = remaining.find(x => x.clip.aiAnalysis?.clipRole === 'result');
+    if (bestResult) {
+      // Swap the lowest-scored non-anchor clip for the result clip
+      for (let i = filtered.length - 1; i >= 0; i--) {
+        if (filtered[i].clip.id !== anchor.id) { filtered[i] = bestResult; break; }
+      }
+    }
+  }
+
+  console.log('[Topic Filter] Anchor: "' + (anchor.aiAnalysis?.suggested_clip_title || anchor.name || '?') + '" (hookWorth=' + (anchor.aiAnalysis?.hookWorthiness?.toFixed(2) || '?') + ')');
+  console.log('[Topic Filter] Pool ' + pool.length + ' → ' + filtered.length + ':');
+  filtered.forEach(x => {
+    const t = (x.clip.aiAnalysis?.suggested_clip_title || x.clip.name || '?').substring(0, 50);
+    console.log('  • "' + t + '" — score=' + x.score.toFixed(2) + ', kwOverlap=' + x.kwOverlap + ', catMatch=' + x.catMatch + ', role=' + (x.clip.aiAnalysis?.clipRole || '?'));
+  });
+
+  // Safety: if filter reduced below 2 clips, fall back to original pool
+  if (filtered.length < 2) {
+    console.warn('[Topic Filter] Reduced below 2 clips; falling back to original pool');
+    return pool;
+  }
+
+  return filtered.map(x => x.clip);
+}
+
 async function aiEditQueueSlot(slotIdx) {
   if (!CONFIG.ai.enabled || CONFIG.ai.provider !== 'openai') {
     alert('AI Edit requires OpenAI provider with API key.');
@@ -3821,6 +3927,11 @@ async function aiEditQueueSlot(slotIdx) {
     const biggest = [...STORIES].sort((a,b) => (b.clipIndices||[]).length - (a.clipIndices||[]).length)[0];
     if (biggest) clipPool = (biggest.clipIndices || []).map(idx => clips.filter(c => c.aiAnalysis)[idx]).filter(Boolean);
   }
+
+  // Topic-similarity filter: tighten the pool to clips that share keywords +
+  // jobCategory with the highest-hookWorthiness anchor. Prevents the editor
+  // from stitching unrelated jobs into one video.
+  clipPool = filterPoolByTopicSimilarity(clipPool);
 
   if (clipPool.length < 2) {
     alert('Need at least 2 analyzed clips in this story before AI Edit can run. Try Find Stories or assign clips first.');
@@ -4221,16 +4332,19 @@ async function playNext() {
     setTimeout(() => { if (playing) hookEl.style.opacity = '0'; }, Math.min(3, segDur) * 1000);
   }
 
-  // Live captions + scrubber tracking — use both timeupdate AND a 100ms interval
-  // for smoother updates (timeupdate can fire as rarely as 4x/sec depending on browser).
+  // Captions + scrubber. Per-cut caption (from AI Edit) is the PRIMARY signal —
+  // it's the punchy 3-7 word phrase chosen specifically for this moment. Only
+  // fall back to live Whisper word-stream for legacy slots that didn't go
+  // through AI Edit (and therefore have no cd.caption).
   const captionEl = document.getElementById('o-caption');
   if (captionEl) {
     captionEl.style.display = 'block';
-    captionEl.textContent = ''; // clear stale words from previous segment
+    captionEl.textContent = cd.caption || ''; // AI-generated per-cut caption
   }
   const refreshCaptions = () => {
     const tInClip = v.currentTime;
-    if (cl.transcript?.words?.length && captionEl) {
+    // Per-cut caption already shown above. Only stream Whisper words if no per-cut caption.
+    if (!cd.caption && cl.transcript?.words?.length && captionEl) {
       const active = [];
       const lookback = Math.max(0, tInClip - 0.5);
       for (const w of cl.transcript.words) {
@@ -4238,8 +4352,6 @@ async function playNext() {
         if (w.s > tInClip + 0.2) break;
       }
       captionEl.textContent = active.slice(-3).join(' ');
-    } else if (captionEl) {
-      captionEl.textContent = ''; // no transcript on this clip → clear
     }
     updateScrubber(tInClip);
   };
