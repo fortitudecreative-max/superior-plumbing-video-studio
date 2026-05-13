@@ -228,6 +228,14 @@
 .tl-cut-btn.tl-swap{background:rgba(29,158,117,0.18);border-color:#1d9e75;color:#5dcaa5;}
 .tl-cut-btn:hover{filter:brightness(1.3);}
 .tl-cut-btns{display:flex;gap:3px;margin-top:4px;}
+body.project-mode-active #templates-section{display:none !important;}
+body.project-mode-active #stories-panel{display:none !important;}
+body.project-mode-active #drive-pull-btn{display:none !important;}
+body.project-mode-active .tab[data-t="queue"]{display:none !important;}
+.caption-cut-row{margin-bottom:8px;}
+.caption-cut-row .caption-meta{display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-bottom:2px;}
+.caption-cut-row input.caption-input{width:100%;padding:5px 8px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:11px;font-family:inherit;box-sizing:border-box;}
+.caption-cut-row input.caption-input:focus{outline:none;border-color:var(--primary);}
   .tl-trim { margin-top: 6px; }
   .tl-trim-row { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
   .tl-trim-row label { font-size: 9px; color: var(--text-muted); width: 20px; }
@@ -468,7 +476,7 @@
 <div class="app hidden" id="app">
   <!-- SIDEBAR -->
   <div class="sidebar">
-    <div class="sb-section">
+    <div class="sb-section" id="templates-section">
       <h3>Templates</h3>
       <div id="tmpl-list"></div>
     </div>
@@ -554,6 +562,11 @@
             <input id="vid-title" placeholder="e.g. 6 AM start" style="flex:1;">
             <button onclick="regenerateTitle()" title="AI regenerate title from current clips" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text-muted);padding:5px 8px;border-radius:4px;font-size:11px;cursor:pointer;">🔄</button>
           </div>
+        </div>
+        <div class="txt-grp" id="captions-grp" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;">
+          <label>Captions <span style="font-size:10px;color:var(--text-muted);font-weight:400;">(per cut — edit inline)</span></label>
+          <div id="captions-list" style="font-size:11px;"></div>
+          <button id="regen-captions-btn" onclick="regenerateAllCaptions()" style="display:none;font-size:11px;padding:6px 10px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text);border-radius:4px;margin-top:6px;cursor:pointer;width:100%;">🔄 Regenerate all captions</button>
         </div>
       </div>
 
@@ -1182,6 +1195,8 @@ function launchApp() {
   tryRestoreLocalFolder();
   // Try to silently restore the project folder (Project Mode)
   tryRestoreProjectFolder();
+  // Toggle UI based on whether this client is in Project Mode
+  applyProjectModeUI();
 }
 
 // ═══════════════════════════════════════
@@ -1400,6 +1415,132 @@ async function scanJobFolder(folderHandle, client) {
   return job;
 }
 
+// ─── PHASE 2: CAPTIONS PANEL + PROJECT MODE UI TOGGLE ─────
+// Per-cut caption editor (right-side panel). Builds editable inputs from segClips,
+// commits changes on blur, and refreshes the preview overlay in real time.
+
+function renderCaptionPanel() {
+  const list = document.getElementById('captions-list');
+  const regenBtn = document.getElementById('regen-captions-btn');
+  if (!list) return;
+  if (!selTmpl || !Object.keys(segClips || {}).length) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:8px 0;">Load a slot or job to edit per-cut captions</div>';
+    if (regenBtn) regenBtn.style.display = 'none';
+    return;
+  }
+  const keys = Object.keys(segClips).sort((a, b) => parseInt(a) - parseInt(b));
+  let html = '';
+  keys.forEach(k => {
+    const s = segClips[k];
+    const n = parseInt(k) + 1;
+    const dur = Math.round((s.trimEnd - s.trimStart) * 10) / 10;
+    const captionEsc = (s.caption || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    html += '<div class="caption-cut-row">';
+    html += '<div class="caption-meta"><span>Cut ' + n + '</span><span>' + dur + 's</span></div>';
+    html += '<input type="text" class="caption-input" data-cut-idx="' + k + '" value="' + captionEsc + '" oninput="updateCutCaption(this.dataset.cutIdx, this.value)" placeholder="Caption for cut ' + n + '">';
+    html += '</div>';
+  });
+  list.innerHTML = html;
+  if (regenBtn) regenBtn.style.display = 'block';
+}
+
+function updateCutCaption(cutIdx, newText) {
+  if (!segClips[cutIdx]) return;
+  segClips[cutIdx].caption = newText;
+  // If the preview is currently showing this cut, update the overlay live
+  const captionEl = document.getElementById('o-caption');
+  if (captionEl && typeof playIdx !== 'undefined' && playIdx === parseInt(cutIdx)) {
+    captionEl.textContent = newText;
+  }
+}
+
+async function regenerateAllCaptions() {
+  if (!selTmpl || !Object.keys(segClips).length) return;
+  const apiKey = CONFIG.ai.geminiKey || (CONFIG.ai.provider === 'gemini' ? CONFIG.ai.key : null);
+  if (!apiKey) { alert('Gemini API key required for regenerating captions. Add it in Setup.'); return; }
+
+  const btn = document.getElementById('regen-captions-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Asking Gemini...'; }
+
+  const keys = Object.keys(segClips).sort((a, b) => parseInt(a) - parseInt(b));
+  const cutContext = keys.map(k => {
+    const s = segClips[k];
+    const cl = clips.find(c => c.id === s.clipId);
+    const a = cl?.aiAnalysis || {};
+    return {
+      cutIdx: parseInt(k),
+      clipTitle: a.suggested_clip_title || cl?.name?.substring(0, 40) || '?',
+      role: a.clipRole || '?',
+      content: (a.content_description || '').substring(0, 200),
+      trimStart: s.trimStart, trimEnd: s.trimEnd,
+      currentCaption: s.caption || ''
+    };
+  });
+
+  const hookTone = BRAND.hookTone || 'storyteller';
+  const prompt = 'Regenerate per-cut captions for this short-form vertical video. Each caption: 3-7 words, action-verb phrasing, ' + hookTone + ' voice (descriptive moment-framing, never "Watch this!" or hype). Captions appear as lower-third overlays during the corresponding cut. Cuts:\n\n' +
+    cutContext.map(c => 'Cut ' + (c.cutIdx + 1) + ' [' + c.role + ', ' + (c.trimEnd - c.trimStart).toFixed(1) + 's]: ' + c.clipTitle + (c.content ? ' — ' + c.content : '')).join('\n') +
+    '\n\nReturn JSON: {"captions":[{"cutIdx":0,"caption":"..."}]}';
+
+  try {
+    const resp = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'object',
+            properties: {
+              captions: { type: 'array', items: { type: 'object',
+                properties: { cutIdx: { type: 'integer' }, caption: { type: 'string' } },
+                required: ['cutIdx', 'caption']
+              }}
+            },
+            required: ['captions']
+          },
+          temperature: 0.4, maxOutputTokens: 2000
+        }
+      })
+    });
+    if (!resp.ok) throw new Error('Gemini ' + resp.status);
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Empty Gemini response');
+    const result = JSON.parse(text);
+    let updated = 0;
+    (result.captions || []).forEach(c => {
+      if (segClips[c.cutIdx]) { segClips[c.cutIdx].caption = c.caption; updated++; }
+    });
+    renderCaptionPanel();
+    if (typeof renderTL === 'function') renderTL();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '✓ Regenerated ' + updated + ' captions';
+      setTimeout(() => { btn.textContent = '🔄 Regenerate all captions'; }, 3000);
+    }
+    console.log('[Captions] Regenerated ' + updated + ' captions via Gemini');
+  } catch (e) {
+    console.error('Regen captions failed:', e);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚠ ' + (e.message || '').substring(0, 28);
+      setTimeout(() => { btn.textContent = '🔄 Regenerate all captions'; }, 4000);
+    }
+  }
+}
+
+// Toggle CSS class on body so the templates/stories/queue UI hides in project mode
+function applyProjectModeUI() {
+  const c = getActiveClient();
+  if (c?.projectMode) {
+    document.body.classList.add('project-mode-active');
+  } else {
+    document.body.classList.remove('project-mode-active');
+  }
+}
+
 async function openProjectFolder() {
   if (!('showDirectoryPicker' in window)) {
     alert('Your browser does not support local folder access. Use Chrome or Edge.');
@@ -1448,6 +1589,7 @@ async function openProjectFolder() {
   saveClients();
   if (typeof saveClientData === 'function') saveClientData(activeClientId);
   renderJobsList();
+  applyProjectModeUI();
 
   if (btn) {
     btn.disabled = false;
@@ -2366,6 +2508,7 @@ function renderTL() {
       </div></div>`;
   }).join('');
   if (typeof renderScrubber === 'function') renderScrubber();
+  if (typeof renderCaptionPanel === 'function') renderCaptionPanel();
 }
 
 // Bulk retag: every clip currently classified as 'Unclassified' is moved into
