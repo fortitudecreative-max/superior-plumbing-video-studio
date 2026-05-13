@@ -480,6 +480,10 @@
       <button class="drive-btn" id="local-folder-btn" onclick="openLocalFolder()" style="background:var(--bg-elev);border-color:var(--primary);color:var(--primary);">
         💾 Open Local Folder
       </button>
+      <button class="drive-btn" id="project-folder-btn" onclick="openProjectFolder()" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);border-color:#3b82f6;color:white;font-weight:600;" title="Project Mode (Phase 1): point at a root folder, subfolders become Jobs. Each Job = one short video.">
+        📁 Open Project Folder
+      </button>
+      <div id="jobs-panel" style="display:none;margin-bottom:10px;"></div>
       <button class="drive-btn" id="analyze-all-btn" onclick="analyzeAllClips()" style="display:none;background:linear-gradient(135deg,var(--primary),var(--primary-dark));border-color:var(--primary);font-weight:600;">
         🤖 Analyze All Clips
       </button>
@@ -1176,6 +1180,8 @@ function launchApp() {
   updateStats();
   // Try to silently restore the previously-granted local folder handle
   tryRestoreLocalFolder();
+  // Try to silently restore the project folder (Project Mode)
+  tryRestoreProjectFolder();
 }
 
 // ═══════════════════════════════════════
@@ -1303,6 +1309,259 @@ async function tryRestoreLocalFolder() {
     }
   } catch (e) { console.warn('tryRestoreLocalFolder failed:', e); }
   return false;
+}
+
+// ─── PROJECT MODE (FOLDER-BASED JOBS) ─────────────────────
+// Per Jason's approved spec: each client points the app at one root folder.
+// Subfolders inside the root become Jobs (the user organizes clips by job).
+// AI Edit (Phase 3) will operate on a single Job's clip pool. No clustering.
+
+async function persistProjectRoot(clientId, handle) {
+  try {
+    const db = await _spvsOpenHandleDb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction('handles', 'readwrite');
+      const r = tx.objectStore('handles').put(handle, 'project-' + clientId);
+      r.onsuccess = () => res();
+      r.onerror = () => rej(r.error);
+    });
+  } catch (e) { console.warn('persistProjectRoot failed:', e); }
+}
+
+async function restoreProjectRoot(clientId) {
+  try {
+    const db = await _spvsOpenHandleDb();
+    return await new Promise((res) => {
+      const tx = db.transaction('handles', 'readonly');
+      const r = tx.objectStore('handles').get('project-' + clientId);
+      r.onsuccess = () => res(r.result || null);
+      r.onerror = () => res(null);
+    });
+  } catch (e) { return null; }
+}
+
+function detectGoPro(filename, file) {
+  // GoPro default filenames: GX######.MP4 (HERO), GH######.MP4, GP######.MP4, GS######.MP4
+  return /^G[XHPS]\d{6,}\.(mp4|mov)$/i.test(filename || '');
+}
+
+// Re-use any previously-computed Gemini analysis for a clip with the same
+// filename. Saves the user from re-paying for analysis when reorganizing.
+function findCachedAnalysis(client, filename) {
+  if (!client) return null;
+  for (const job of (client.jobs || [])) {
+    for (const cl of (job.clips || [])) {
+      if (cl.name === filename && cl.aiAnalysis?._analyzer === 'gemini-2.5-video') {
+        return { aiAnalysis: cl.aiAnalysis, transcript: cl.transcript };
+      }
+    }
+  }
+  // Also check the legacy flat `clips[]` array (from pre-Project-mode data)
+  if (typeof clips !== 'undefined' && Array.isArray(clips)) {
+    const found = clips.find(cl => cl.name === filename && cl.aiAnalysis?._analyzer === 'gemini-2.5-video');
+    if (found) return { aiAnalysis: found.aiAnalysis, transcript: found.transcript };
+  }
+  return null;
+}
+
+async function scanJobFolder(folderHandle, client) {
+  const jobId = 'job-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 5);
+  const job = {
+    id: jobId,
+    folderName: folderHandle.name,
+    dateScanned: new Date().toISOString(),
+    clips: [],
+    videos: []
+  };
+  for await (const entry of folderHandle.values()) {
+    if (entry.kind === 'file' && /\.(mp4|mov|m4v|webm)$/i.test(entry.name)) {
+      let file;
+      try { file = await entry.getFile(); } catch (e) { console.warn('Skip', entry.name, e); continue; }
+      const clipId = 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 5);
+      const cached = findCachedAnalysis(client, entry.name);
+      job.clips.push({
+        id: clipId,
+        name: entry.name,
+        fileHandle: entry,
+        isGoPro: detectGoPro(entry.name, file),
+        duration: 0,
+        size: file.size,
+        sizeMB: (file.size / (1024 * 1024)).toFixed(1),
+        mimeType: file.type || 'video/mp4',
+        url: null,
+        loaded: false,
+        cropX: 50,  // 0-100 manual crop center (50 = centered)
+        aiAnalysis: cached?.aiAnalysis || null,
+        transcript: cached?.transcript || null,
+        _cacheHit: !!cached
+      });
+    }
+  }
+  return job;
+}
+
+async function openProjectFolder() {
+  if (!('showDirectoryPicker' in window)) {
+    alert('Your browser does not support local folder access. Use Chrome or Edge.');
+    return;
+  }
+  if (!activeClientId) {
+    alert('Set up a client in Setup before opening a project folder.');
+    return;
+  }
+  const btn = document.getElementById('project-folder-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Opening picker...'; }
+  let rootHandle;
+  try {
+    rootHandle = await window.showDirectoryPicker({ mode: 'read', id: 'spvs-project-root-' + activeClientId });
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📁 Open Project Folder'; }
+    if (e.name !== 'AbortError') alert('Failed to open folder: ' + (e.message || e));
+    return;
+  }
+  await persistProjectRoot(activeClientId, rootHandle);
+
+  const c = getActiveClient();
+  if (!c) return;
+  c.projectMode = true;
+  c.rootFolderPath = rootHandle.name;
+  c.productionTarget = c.productionTarget || 30;
+  c.jobs = []; // clean slate per approved spec; analysis cache preserved by filename match
+
+  let scanned = 0, totalCacheHits = 0;
+  for await (const entry of rootHandle.values()) {
+    if (entry.kind === 'directory') {
+      if (btn) btn.textContent = '⏳ Scanning ' + (scanned + 1) + ': ' + entry.name.substring(0, 18);
+      try {
+        const job = await scanJobFolder(entry, c);
+        if (job.clips.length > 0) {
+          c.jobs.push(job);
+          totalCacheHits += job.clips.filter(cl => cl._cacheHit).length;
+        }
+        scanned++;
+      } catch (err) {
+        console.warn('Failed to scan job folder', entry.name, err);
+      }
+    }
+  }
+
+  saveClients();
+  if (typeof saveClientData === 'function') saveClientData(activeClientId);
+  renderJobsList();
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = '✓ ' + c.jobs.length + ' jobs · ' + totalCacheHits + ' cached';
+    setTimeout(() => { btn.textContent = '📁 Open Project Folder'; }, 5000);
+  }
+  console.log('[Project Mode] Imported ' + c.jobs.length + ' jobs (' + totalCacheHits + ' analyses re-used from cache):');
+  c.jobs.forEach(j => console.log('  • "' + j.folderName + '" — ' + j.clips.length + ' clips' + (j.clips.some(cl => cl.isGoPro) ? ' (incl. GoPro)' : '')));
+}
+
+async function reattachJobFiles(rootHandle) {
+  const c = getActiveClient();
+  if (!c?.jobs?.length) return 0;
+  let restored = 0;
+  for await (const folderEntry of rootHandle.values()) {
+    if (folderEntry.kind !== 'directory') continue;
+    const job = c.jobs.find(j => j.folderName === folderEntry.name);
+    if (!job) continue;
+    try {
+      for await (const fileEntry of folderEntry.values()) {
+        if (fileEntry.kind !== 'file') continue;
+        const clip = job.clips.find(cl => cl.name === fileEntry.name);
+        if (clip) {
+          clip.fileHandle = fileEntry;
+          clip.url = null;
+          clip.loaded = false;
+          restored++;
+        }
+      }
+    } catch (e) { console.warn('reattachJobFiles error in', folderEntry.name, e); }
+  }
+  return restored;
+}
+
+async function tryRestoreProjectFolder() {
+  if (!activeClientId) return;
+  const c = getActiveClient();
+  if (!c?.projectMode) return;
+  const rootHandle = await restoreProjectRoot(activeClientId);
+  if (!rootHandle) return;
+  try {
+    const perm = await rootHandle.queryPermission({ mode: 'read' });
+    const btn = document.getElementById('project-folder-btn');
+    if (perm === 'granted') {
+      const restored = await reattachJobFiles(rootHandle);
+      console.log('[Project Mode] Silently restored ' + restored + ' file handles across ' + (c.jobs?.length || 0) + ' jobs');
+      if (btn && restored > 0) {
+        btn.textContent = '✓ ' + (c.jobs?.length || 0) + ' jobs restored';
+        setTimeout(() => { btn.textContent = '📁 Open Project Folder'; }, 4000);
+      }
+      renderJobsList();
+    } else if (perm === 'prompt') {
+      console.log('[Project Mode] Permission expired; click button to resume');
+      if (btn) {
+        btn.textContent = '🔓 Resume Project Folder (1 click)';
+        btn.onclick = async () => {
+          try {
+            const p = await rootHandle.requestPermission({ mode: 'read' });
+            if (p === 'granted') {
+              const n = await reattachJobFiles(rootHandle);
+              btn.textContent = '✓ ' + n + ' clip handles restored';
+              setTimeout(() => { btn.textContent = '📁 Open Project Folder'; btn.onclick = openProjectFolder; }, 3000);
+              renderJobsList();
+            } else {
+              btn.textContent = '⚠️ Permission denied';
+              setTimeout(() => { btn.textContent = '📁 Open Project Folder'; btn.onclick = openProjectFolder; }, 3000);
+            }
+          } catch (e) {
+            btn.textContent = '⚠️ ' + (e.message || e).substring(0, 30);
+            setTimeout(() => { btn.textContent = '📁 Open Project Folder'; btn.onclick = openProjectFolder; }, 3000);
+          }
+        };
+      }
+    }
+  } catch (e) { console.warn('tryRestoreProjectFolder failed:', e); }
+}
+
+function renderJobsList() {
+  const c = getActiveClient();
+  const panel = document.getElementById('jobs-panel');
+  if (!panel) return;
+  if (!c?.projectMode || !c.jobs?.length) {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+  panel.style.display = 'block';
+  let html = '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 6px;font-weight:600;">📁 Jobs (' + c.jobs.length + ')</div>';
+  c.jobs.forEach(j => {
+    const editedCount = (j.videos || []).filter(v => v.status === 'ready' || v.status === 'published').length;
+    const statusDot = editedCount > 0 ? '🟢' : '⚪';
+    const totalAnalyzed = j.clips.filter(cl => cl.aiAnalysis?._analyzer === 'gemini-2.5-video').length;
+    const goproCount = j.clips.filter(cl => cl.isGoPro).length;
+    html += '<div class="job-row" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;font-size:12px;background:var(--bg-elev);transition:background 0.1s;" onmouseover="this.style.background=\'var(--bg-elev-2,#1a1a1a)\'" onmouseout="this.style.background=\'var(--bg-elev)\'" onclick="loadJob(\'' + j.id + '\')">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">';
+    html += '<div style="font-weight:500;color:var(--text);">' + statusDot + ' ' + (j.folderName || '?').substring(0, 26) + '</div>';
+    html += '<div style="font-size:10px;color:var(--text-muted);">' + j.clips.length + ' clips</div>';
+    html += '</div>';
+    html += '<div style="font-size:10px;color:var(--text-muted);">';
+    html += totalAnalyzed + '/' + j.clips.length + ' analyzed';
+    if (goproCount > 0) html += ' · ' + goproCount + ' GoPro';
+    if (editedCount > 0) html += ' · ' + editedCount + ' video' + (editedCount === 1 ? '' : 's');
+    html += '</div>';
+    html += '</div>';
+  });
+  panel.innerHTML = html;
+}
+
+function loadJob(jobId) {
+  const c = getActiveClient();
+  const job = c?.jobs?.find(j => j.id === jobId);
+  if (!job) return;
+  console.log('[Project Mode] Loaded job: "' + job.folderName + '" with ' + job.clips.length + ' clips. Phase 3 will wire AI Edit per Job here.');
+  alert('Phase 1 only: Job "' + job.folderName + '" loaded (' + job.clips.length + ' clips). Phase 2/3 will add the editor UI for Jobs.');
 }
 
 async function openLocalFolder() {
