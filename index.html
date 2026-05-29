@@ -236,6 +236,32 @@ body.project-mode-active .tab[data-t="queue"]{display:none !important;}
 .caption-cut-row .caption-meta{display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-bottom:2px;}
 .caption-cut-row input.caption-input{width:100%;padding:5px 8px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:11px;font-family:inherit;box-sizing:border-box;}
 .caption-cut-row input.caption-input:focus{outline:none;border-color:var(--primary);}
+
+/* ───── UI polish + overflow protection (Phase 2.5) ───── */
+/* Brand + Setup buttons in top-right were font-size:10px — way too small */
+.ctrl-btn { padding: 7px 14px !important; font-size: 12px !important; min-height: 32px; }
+/* Per-cut Regenerate/Swap/Remove buttons were 22×22 — too small to click reliably */
+.tl-cut-btn { padding: 5px 10px !important; font-size: 14px !important; min-width: 30px; min-height: 28px; }
+.tl-clip-rm { padding: 5px 10px !important; font-size: 14px !important; min-width: 30px; min-height: 28px; }
+.tl-cut-btns { gap: 5px !important; margin-top: 6px !important; }
+/* Move txt-panel out of absolute positioning so it can't overlap content */
+.txt-panel { position: relative !important; top: auto !important; right: auto !important; width: 280px !important; margin: 0 0 12px 12px; align-self: flex-start; }
+/* Prevent hook/CTA overlay text from being clipped */
+.ovr-hook, .ovr-caption, .ovr-cta { white-space: normal !important; word-wrap: break-word; overflow-wrap: break-word; max-width: 90% !important; }
+/* Tighten the controls bar (Play/Reset/time) to reduce dead space below preview */
+.controls { margin-top: 10px !important; gap: 10px !important; }
+.controls .ctrl-btn { padding: 8px 16px !important; font-size: 13px !important; }
+/* Scrubber wrap — reduce padding */
+.scrubber-wrap { margin-top: 6px !important; }
+/* Timeline cards — give them more breathing room and remove dead vertical gap */
+.tl-seg { padding: 10px !important; }
+/* Action buttons in bottom-right (AI Auto-Fill / Export EDL / Save) — make them touch-friendly */
+button[onclick*="autoFillAI"], button[onclick*="exportEDL"], button[onclick*="saveToQueue"] { padding: 8px 14px !important; font-size: 12px !important; }
+/* Make sure timeline doesn't bump into the right panel */
+.timeline { margin-top: 14px; }
+/* Stop the .ai-rec recommendation card from leaving a fixed-width hole when empty */
+.ai-rec[style*="display:none"], .ai-rec[style*="display: none"] { display: none !important; }
+.ai-rec:empty { display: none !important; }
   .tl-trim { margin-top: 6px; }
   .tl-trim-row { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
   .tl-trim-row label { font-size: 9px; color: var(--text-muted); width: 20px; }
@@ -560,8 +586,17 @@ body.project-mode-active .tab[data-t="queue"]{display:none !important;}
           <label>Video Title</label>
           <div style="display:flex;gap:4px;align-items:center;">
             <input id="vid-title" placeholder="e.g. 6 AM start" style="flex:1;">
-            <button onclick="regenerateTitle()" title="AI regenerate title from current clips" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text-muted);padding:5px 8px;border-radius:4px;font-size:11px;cursor:pointer;">🔄</button>
+            <button onclick="regenerateTitle()" title="AI regenerate title from current clips" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text-muted);padding:6px 10px;border-radius:4px;font-size:13px;cursor:pointer;">🔄</button>
           </div>
+        </div>
+        <div class="txt-grp">
+          <label>Export Size <span style="font-size:10px;color:var(--text-muted);font-weight:400;">(aspect ratio)</span></label>
+          <select id="export-size" onchange="applyExportSize(this.value)" style="width:100%;padding:7px 10px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px;font-family:inherit;cursor:pointer;">
+            <option value="9:16">9:16 Vertical — Reels / TikTok / Shorts (1080×1920)</option>
+            <option value="1:1">1:1 Square — Instagram feed (1080×1080)</option>
+            <option value="4:5">4:5 Portrait — Instagram alt (1080×1350)</option>
+            <option value="16:9">16:9 Horizontal — YouTube / LinkedIn (1920×1080)</option>
+          </select>
         </div>
         <div class="txt-grp" id="captions-grp" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;">
           <label>Captions <span style="font-size:10px;color:var(--text-muted);font-weight:400;">(per cut — edit inline)</span></label>
@@ -1197,6 +1232,8 @@ function launchApp() {
   tryRestoreProjectFolder();
   // Toggle UI based on whether this client is in Project Mode
   applyProjectModeUI();
+  // Apply the client's saved export aspect ratio
+  syncExportSizeFromClient();
 }
 
 // ═══════════════════════════════════════
@@ -1418,6 +1455,38 @@ async function scanJobFolder(folderHandle, client) {
 // ─── PHASE 2: CAPTIONS PANEL + PROJECT MODE UI TOGGLE ─────
 // Per-cut caption editor (right-side panel). Builds editable inputs from segClips,
 // commits changes on blur, and refreshes the preview overlay in real time.
+
+// Export size handling — drives preview phone aspect ratio + persists per-client.
+function applyExportSize(ratio) {
+  const phone = document.getElementById('phone');
+  if (!phone) return;
+  const presets = {
+    '9:16': { aspectRatio: '9/16', width: '280px' },
+    '1:1':  { aspectRatio: '1/1',  width: '380px' },
+    '4:5':  { aspectRatio: '4/5',  width: '340px' },
+    '16:9': { aspectRatio: '16/9', width: '500px' }
+  };
+  const r = presets[ratio] || presets['9:16'];
+  phone.style.aspectRatio = r.aspectRatio;
+  phone.style.width = r.width;
+  phone.style.height = 'auto';
+  // Persist on the active client
+  const c = (typeof getActiveClient === 'function') ? getActiveClient() : null;
+  if (c) {
+    c.exportAspectRatio = ratio;
+    if (typeof saveClients === 'function') saveClients();
+  }
+  console.log('[Export] Aspect set to ' + ratio);
+}
+
+function syncExportSizeFromClient() {
+  const c = (typeof getActiveClient === 'function') ? getActiveClient() : null;
+  const sel = document.getElementById('export-size');
+  if (!sel) return;
+  const ratio = c?.exportAspectRatio || '9:16';
+  sel.value = ratio;
+  applyExportSize(ratio);
+}
 
 function renderCaptionPanel() {
   const list = document.getElementById('captions-list');
